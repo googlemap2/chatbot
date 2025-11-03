@@ -158,7 +158,7 @@ def create_rag_chain(llm, embeddings):
         # Tạo một tài liệu rỗng để tránh lỗi
         all_documents = [Document(page_content="Không có kiến thức.")]
 
-    print(f"✅ Đã nạp tổng cộng {len(all_documents)} tài liệu/trang từ thư mục 'data'.")
+    print(all_documents[0:2]) # In 2 tài liệu đầu để kiểm tra
 
     # --- 3. TẠO VECTOR STORE (Như cũ) ---
     print("Khởi tạo Vector Store FAISS...")

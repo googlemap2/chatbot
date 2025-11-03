@@ -1,4 +1,4 @@
-# services.py
+import os
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline, BitsAndBytesConfig
 from langchain_huggingface import HuggingFacePipeline
@@ -10,6 +10,8 @@ from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 from huggingface_hub import login
 from langchain_community.llms import VLLM
+import pandas as pd
+from langchain_community.document_loaders import PyPDFLoader, TextLoader
 
 # Import cấu hình từ file config.py
 import config
@@ -94,27 +96,77 @@ def load_embedding_model():
     print("✅ Mô hình Embedding đã sẵn sàng.")
     return embeddings
 
+# services.py
+
+# ... (Hàm load_llm_pipeline và load_embedding_model giữ nguyên) ...
+
 def create_rag_chain(llm, embeddings):
     """
-    Tải dữ liệu kiến thức và xây dựng RAG chain.
+    Tự động QUÉT thư mục DATA_DIR, nạp TẤT CẢ các file (.csv, .pdf, .txt)
+    và xây dựng RAG chain.
     """
-    # 1. Tải tài liệu (Bạn có thể thay bằng code đọc file CSV)
-    print("Tải tài liệu kiến thức...")
-    documents = [
-        Document(page_content="RAG (Retrieval-Augmented Generation) là một kỹ thuật cho phép LLM truy cập kiến thức bên ngoài."),
-        Document(page_content="Microsoft phát triển mô hình Phi-3-mini."),
-        Document(page_content="FAISS là một thư viện của Facebook AI để tìm kiếm tương đồng hiệu suất cao."),
-        Document(page_content="Chính sách đổi trả hàng là 30 ngày kể từ ngày mua hàng.")
-    ]
-    # (Đây là nơi bạn thêm code đọc file products.csv)
+    print(f"Bắt đầu quét thư mục kiến thức: {config.DATA_DIR}")
+    
+    all_documents = [] # List để chứa tất cả tài liệu
 
-    # 2. Tạo Vector Store
+    # --- 1. QUÉT THƯ MỤC VÀ LOAD FILE ---
+    try:
+        # Lấy danh sách file trong thư mục DATA_DIR
+        filenames = os.listdir(config.DATA_DIR)
+        
+        for filename in filenames:
+            filepath = os.path.join(config.DATA_DIR, filename)
+            
+            # --- Xử lý file CSV (Logic cũ của bạn) ---
+            if filename.endswith(".csv"):
+                print(f"  [CSV] Đang xử lý file: {filename}")
+                df = pd.read_csv(filepath)
+                for _, row in df.iterrows():
+                    content = f"Tên: {row['product_name']}\n"
+                    content += f"Loại: {row['category']}\n"
+                    if row['price'] > 0:
+                        content += f"Giá: {row['price']:,} VNĐ\n"
+                    content += f"Mô tả: {row['description']}"
+                    doc = Document(page_content=content, metadata={"source": filename})
+                    all_documents.append(doc)
+
+            # --- Xử lý file PDF ---
+            elif filename.endswith(".pdf"):
+                print(f"  [PDF] Đang xử lý file: {filename}")
+                loader = PyPDFLoader(filepath)
+                docs = loader.load() # Tải và tách trang
+                all_documents.extend(docs) # Thêm các trang vào list
+
+            # --- Xử lý file Text ---
+            elif filename.endswith(".txt"):
+                print(f"  [TXT] Đang xử lý file: {filename}")
+                loader = TextLoader(filepath, encoding="utf-8")
+                docs = loader.load()
+                all_documents.extend(docs)
+            
+            else:
+                print(f"  [SKIP] Bỏ qua file không hỗ trợ: {filename}")
+
+    except FileNotFoundError:
+        print(f"⚠️ LỖI: Không tìm thấy thư mục {config.DATA_DIR}.")
+    except Exception as e:
+        print(f"⚠️ LỖI khi quét thư mục: {e}")
+
+    # --- 2. KIỂM TRA DỮ LIỆU ---
+    if not all_documents:
+        print("⚠️ CẢNH BÁO: Không nạp được bất kỳ tài liệu nào. Bot sẽ không có kiến thức.")
+        # Tạo một tài liệu rỗng để tránh lỗi
+        all_documents = [Document(page_content="Không có kiến thức.")]
+
+    print(f"✅ Đã nạp tổng cộng {len(all_documents)} tài liệu/trang từ thư mục 'data'.")
+
+    # --- 3. TẠO VECTOR STORE (Như cũ) ---
     print("Khởi tạo Vector Store FAISS...")
-    vector_store = FAISS.from_documents(documents, embeddings)
-    retriever = vector_store.as_retriever(search_kwargs={"k": 2})
+    vector_store = FAISS.from_documents(all_documents, embeddings)
+    retriever = vector_store.as_retriever(search_kwargs={"k": 3}) # Lấy 3 kết quả
     print("✅ Vector Store FAISS và Retriever đã sẵn sàng.")
 
-    # 3. Định nghĩa Prompt
+    # --- 4. TẠO PROMPT VÀ CHAIN (Như cũ) ---
     rag_template = """<s>[INST] Bạn là một trợ lý AI hữu ích, chuyên nghiệp và chỉ trả lời bằng tiếng Việt.
 Bạn phải trả lời câu hỏi của người dùng DỰA HOÀN TOÀN vào "Nội dung" được cung cấp.
 Nếu "Nội dung" không chứa thông tin để trả lời, hãy nói: "Tôi không tìm thấy thông tin trong tài liệu."
@@ -128,14 +180,13 @@ Câu hỏi: {question} [/INST]
     rag_prompt = PromptTemplate.from_template(rag_template)
 
     def format_docs(docs):
-        return "\n\n".join(doc.page_content for doc in docs)
+        return "\n\n---\n\n".join(doc.page_content for doc in docs)
 
-    # 4. Xây dựng Chain
     rag_chain = (
         {"context": retriever | format_docs, "question": RunnablePassthrough()}
         | rag_prompt
         | llm
         | StrOutputParser()
     )
-    print("✅ Pipeline RAG hoàn chỉnh đã sẵn sàng.")
+    print("✅ Pipeline RAG (tự động quét) hoàn chỉnh đã sẵn sàng.")
     return rag_chain

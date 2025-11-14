@@ -96,14 +96,20 @@ def load_llm_pipeline():
     
     print("✅ Tải mô hình LLM thành công (Transformers Pipeline).")
 
+    # Add pad token if missing
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    
     text_generator = pipeline(
         "text-generation",
         model=model,
         tokenizer=tokenizer,
-        max_new_tokens=512,
+        max_new_tokens=256,  # Giảm từ 512 xuống 256
         do_sample=True,
-        temperature=0.1,
-        return_full_text=False
+        temperature=0.7,  # Tăng để nhanh hơn
+        top_p=0.9,
+        return_full_text=False,
+        pad_token_id=tokenizer.eos_token_id
     )
     
     return HuggingFacePipeline(pipeline=text_generator)
@@ -134,8 +140,13 @@ def create_database_connection():
             print("❌ Không tìm thấy DATABASE_URL trong file .env")
             return None, None
         
-        # Tạo SQLAlchemy engine từ DATABASE_URL
-        engine = create_engine(database_url)
+        # Tạo SQLAlchemy engine từ DATABASE_URL với connection pooling
+        engine = create_engine(
+            database_url,
+            pool_size=5,
+            max_overflow=10,
+            pool_pre_ping=True
+        )
         
         # Test connection
         with engine.connect() as conn:
@@ -180,15 +191,15 @@ def get_product_info_from_db(engine, search_term):
         p.description,
         p.price,
         p.sale_price,
+        p.stock,
         c.name as category_name,
+        pv.sku,
         pv.size,
         pv.color,
-        pv.stock,
-        pi.image_url
+        pv.stock as variant_stock
     FROM products p
     LEFT JOIN categories c ON p.category_id = c.id
     LEFT JOIN product_variants pv ON p.id = pv.product_id
-    LEFT JOIN product_images pi ON p.id = pi.product_id AND pi.is_primary = true
     WHERE LOWER(p.name) LIKE LOWER(:search1) 
        OR LOWER(p.description) LIKE LOWER(:search2)
        OR LOWER(c.name) LIKE LOWER(:search3)
@@ -206,7 +217,7 @@ def get_product_info_from_db(engine, search_term):
             })
             rows = result.fetchall()
             
-            # Xử lý kết quả
+            # Xử lý kết quả với group theo product_id
             products = {}
             for row in rows:
                 # Convert Row to dict for easier access
@@ -220,19 +231,23 @@ def get_product_info_from_db(engine, search_term):
                         'description': row_dict['description'],
                         'price': row_dict['price'],
                         'sale_price': row_dict['sale_price'],
+                        'stock': row_dict['stock'],
                         'category': row_dict['category_name'],
-                        'image': row_dict['image_url'],
                         'variants': []
                     }
                 
-                if row_dict['size'] and row_dict['color']:  # size and color exist
+                # Thêm variant nếu có
+                if row_dict['sku']:
                     products[product_id]['variants'].append({
+                        'sku': row_dict['sku'],
                         'size': row_dict['size'],
                         'color': row_dict['color'],
-                        'stock': row_dict['stock']
+                        'stock': row_dict['variant_stock']
                     })
             
             return list(products.values())
+            
+            return products
             
     except Exception as e:
         print(f"❌ Lỗi tìm kiếm sản phẩm: {e}")
@@ -262,7 +277,7 @@ def get_order_info_from_db(engine, search_term):
        OR LOWER(o.phone) LIKE LOWER(:search3)
        OR LOWER(o.email) LIKE LOWER(:search4)
     ORDER BY o.created_at DESC
-    LIMIT 20
+    LIMIT 5
     """
     
     search_pattern = f"%{search_term}%"
@@ -370,7 +385,7 @@ def create_rag_chain(llm, embeddings):
     # --- 3. TẠO VECTOR STORE (Như cũ) ---
     print("Khởi tạo Vector Store FAISS...")
     vector_store = FAISS.from_documents(all_documents, embeddings)
-    retriever = vector_store.as_retriever(search_kwargs={"k": 3}) # Lấy 3 kết quả
+    retriever = vector_store.as_retriever(search_kwargs={"k": 2}) # Lấy 2 kết quả
     print("✅ Vector Store FAISS và Retriever đã sẵn sàng.")
 
     # --- 4. TẠO DATABASE CONNECTION ---
@@ -393,24 +408,25 @@ def create_rag_chain(llm, embeddings):
             # Câu hỏi về sản phẩm
             if any(keyword in question_lower for keyword in ['sản phẩm', 'áo', 'quần', 'giá', 'mua', 'bán']):
                 products = get_product_info_from_db(engine, question)
-                for product in products:
+                for product in products[:3]:  # Chỉ lấy 3 sản phẩm đầu
                     content = f"Sản phẩm: {product['name']}\n"
                     content += f"Danh mục: {product['category']}\n"
-                    content += f"Giá: {product['price']:,.0f} VNĐ\n"
+                    content += f"Giá gốc: {product['price']:,.0f} VNĐ\n"
                     if product['sale_price']:
                         content += f"Giá khuyến mãi: {product['sale_price']:,.0f} VNĐ\n"
+                    content += f"Tồn kho: {product['stock']}\n"
                     content += f"Mô tả: {product['description']}\n"
                     if product['variants']:
                         content += "Biến thể:\n"
-                        for variant in product['variants']:
-                            content += f"  - Size {variant['size']}, Màu {variant['color']}, Tồn kho: {variant['stock']}\n"
+                        for variant in product['variants'][:2]:  # Chỉ hiển thị 2 variant đầu
+                            content += f"  - SKU: {variant['sku']}, Size: {variant['size']}, Màu: {variant['color']}, Tồn kho: {variant['stock']}\n"
                     
                     db_results.append(Document(page_content=content, metadata={"source": "database_products"}))
             
             # Câu hỏi về đơn hàng
             elif any(keyword in question_lower for keyword in ['đơn hàng', 'order', 'mua', 'khách hàng']):
                 orders = get_order_info_from_db(engine, question)
-                for order in orders:
+                for order in orders[:2]:  # Chỉ lấy 2 đơn hàng đầu
                     content = f"Đơn hàng: {order['order_number']}\n"
                     content += f"Khách hàng: {order['customer_name']}\n"
                     content += f"Điện thoại: {order['phone']}\n"
@@ -425,20 +441,11 @@ def create_rag_chain(llm, embeddings):
         
         # 3. Kết hợp kết quả
         all_results = vector_results + db_results
-        return all_results[:5]  # Giới hạn 5 kết quả
+        return all_results[:3]  # Giới hạn 3 kết quả
 
     # --- 6. TẠO PROMPT VÀ CHAIN (Cải tiến) ---
-    rag_template = """<s>[INST] Bạn là một trợ lý AI của shop thời trang, chuyên nghiệp và chỉ trả lời bằng tiếng Việt.
-Bạn phải trả lời câu hỏi của người dùng dựa vào "Nội dung" được cung cấp từ cơ sở dữ liệu và tài liệu.
+    rag_template = """<s>[INST] Bạn là trợ lý AI shop thời trang. Trả lời ngắn gọn bằng tiếng Việt dựa vào thông tin sau:
 
-Hướng dẫn:
-- Ưu tiên thông tin từ cơ sở dữ liệu (database_products, database_orders) vì đây là dữ liệu thực tế nhất
-- Nếu không có thông tin đầy đủ, hãy nói: "Tôi không tìm thấy thông tin đầy đủ về yêu cầu này."
-- Đối với sản phẩm: cung cấp tên, giá, danh mục, biến thể (size, màu, tồn kho)
-- Đối với đơn hàng: cung cấp mã đơn, trạng thái, thông tin khách hàng
-- Trả lời thân thiện và hữu ích
-
-Nội dung:
 {context}
 
 Câu hỏi: {question} [/INST]

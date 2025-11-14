@@ -9,7 +9,7 @@ from langchain_core.prompts import PromptTemplate
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 from huggingface_hub import login
-from langchain_community.llms import VLLM
+# from langchain_community.llms import VLLM  # Bỏ vLLM
 import pandas as pd
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
 
@@ -63,27 +63,47 @@ def login_huggingface():
 
 def load_llm_pipeline():
     """
-    Tải mô hình LLM (AWQ 4-bit) bằng vLLM (Siêu tốc).
+    Tải mô hình LLM bằng Transformers Pipeline (không cần vLLM).
     """
-    QUANTIZED_MODEL_ID = "dangvansam/Vistral-7B-Chat-awq"
-    print(f"Bắt đầu tải mô hình: {QUANTIZED_MODEL_ID} (chế độ vLLM + AWQ)")
-
-    # (Bạn có thể thêm cache_dir="/root/chatbot/models" vào đây nếu muốn)
+    print(f"Bắt đầu tải mô hình: {config.LLM_MODEL_NAME} (chế độ Transformers)")
     
-    llm = VLLM(
-        model=QUANTIZED_MODEL_ID,
-        download_dir=config.MODEL_CACHE_DIR,
-        quantization="awq",
-        dtype="float16", # Dùng float16 cho Tesla T4
-        tensor_parallel_size=1,
-        max_new_tokens=512,
-        temperature=0.1,
-        gpu_memory_utilization=0.50
+    # Sử dụng quantization nếu có GPU
+    quantization_config = None
+    if torch.cuda.is_available():
+        quantization_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_compute_dtype=torch.bfloat16,
+        )
+        print("🚀 Sử dụng 4-bit quantization cho GPU")
+    else:
+        print("💻 Chạy trên CPU (không quantization)")
+
+    tokenizer = AutoTokenizer.from_pretrained(
+        config.LLM_MODEL_NAME,
+        cache_dir=config.MODEL_CACHE_DIR,
+    )
+
+    model = AutoModelForCausalLM.from_pretrained(
+        config.LLM_MODEL_NAME,
+        quantization_config=quantization_config,
+        device_map="auto" if torch.cuda.is_available() else None,
+        cache_dir=config.MODEL_CACHE_DIR,
+        torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32
     )
     
-    print("✅ Tải mô hình vLLM + AWQ thành công.")
-    # vLLM đã là một object LLM của LangChain, không cần pipeline
-    return llm
+    print("✅ Tải mô hình LLM thành công (Transformers Pipeline).")
+
+    text_generator = pipeline(
+        "text-generation",
+        model=model,
+        tokenizer=tokenizer,
+        max_new_tokens=512,
+        do_sample=True,
+        temperature=0.1,
+        return_full_text=False
+    )
+    
+    return HuggingFacePipeline(pipeline=text_generator)
 
 def load_embedding_model():
     """Tải mô hình embedding."""

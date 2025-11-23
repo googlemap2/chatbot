@@ -42,6 +42,8 @@ fastrlock==0.8.3
 filelock==3.20.0
 filetype==1.2.0
 Flask==3.1.2
+flask-socketio==5.4.1
+python-socketio==5.11.4
 frozendict==2.4.7
 frozenlist==1.8.0
 fsspec==2025.10.0

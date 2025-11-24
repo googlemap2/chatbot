@@ -12,26 +12,19 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 print("Khởi tạo Flask server với Socket.IO...")
 
 # --- Load mô hình MỘT LẦN KHI BẮT ĐẦU ---
-# Đây là phần quan trọng. Mô hình được load 1 lần khi server chạy,
-# không phải load lại mỗi lần call API.
 print("Bắt đầu quá trình khởi tạo mô hình AI...")
 try:
-    services.login_huggingface()
-    
-    # 1. Load LLM
+    # Load LLM
     llm = services.load_llm_pipeline()
     
-    # 2. Load Embeddings
-    embeddings = services.load_embedding_model()
-    
-    # 3. Tạo RAG chain
-    rag_chain = services.create_rag_chain(llm, embeddings)
+    # Tạo RAG chain
+    rag_chain = services.create_rag_chain(llm)
     
     print("🎉🎉🎉 Server đã sẵn sàng nhận request! 🎉🎉🎉")
 
 except Exception as e:
     print(f"FATAL ERROR: Không thể khởi tạo mô hình. Lỗi: {e}")
-    sys.exit(1) # Thoát nếu không load được model
+    sys.exit(1)
 
 # --- Định nghĩa API Endpoint ---
 @app.route("/ask", methods=["POST"])

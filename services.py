@@ -1,132 +1,38 @@
-import os
-import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline, BitsAndBytesConfig
-from langchain_huggingface import HuggingFacePipeline
-from langchain_community.embeddings import HuggingFaceEmbeddings
+import google.generativeai as genai
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.documents import Document
-from langchain_community.vectorstores import FAISS
 from langchain_core.prompts import PromptTemplate
-from langchain_core.runnables import RunnablePassthrough, RunnableLambda
+from langchain_core.runnables import RunnableLambda
 from langchain_core.output_parsers import StrOutputParser
-from huggingface_hub import login
-import pandas as pd
-import psycopg2
-from psycopg2.extras import RealDictCursor
 from sqlalchemy import create_engine, text
-import json
 import re
-# Import cấu hình từ file config.py
 import config
-
-def login_huggingface():
-    """Đăng nhập vào Hugging Face."""
-    if config.HUGGINGFACE_TOKEN:
-        login(token=config.HUGGINGFACE_TOKEN)
-        print("✅ Đã đăng nhập Hugging Face!")
-    else:
-        print("⚠️ CẢNH BÁO: Không tìm thấy HUGGINGFACE_ACCESS_TOKEN.")
-
-# def load_llm_pipeline():
-#     """
-#     Tải mô hình LLM (4-bit) và tạo ra HuggingFacePipeline của LangChain.
-#     """
-#     print(f"Bắt đầu tải mô hình: {config.LLM_MODEL_NAME} (chế độ 4-bit)")
-    
-#     quantization_config = BitsAndBytesConfig(
-#         load_in_4bit=True,
-#         bnb_4bit_compute_dtype=torch.bfloat16,
-#     )
-
-#     tokenizer = AutoTokenizer.from_pretrained(
-#         config.LLM_MODEL_NAME,
-#         cache_dir=config.MODEL_CACHE_DIR,
-#     )
-
-#     model = AutoModelForCausalLM.from_pretrained(
-#         config.LLM_MODEL_NAME,
-#         quantization_config=quantization_config,
-#         device_map="auto",
-#         cache_dir=config.MODEL_CACHE_DIR
-#     )
-    
-#     print("✅ Tải mô hình LLM thành công (chế độ 4-bit).")
-
-#     text_generator = pipeline(
-#         "text-generation",
-#         model=model,
-#         tokenizer=tokenizer,
-#         max_new_tokens=512,
-#         do_sample=True,
-#         temperature=0.1,
-#         return_full_text=False
-#     )
-    
-#     return HuggingFacePipeline(pipeline=text_generator)
 
 def load_llm_pipeline():
     """
-    Tải mô hình LLM bằng Transformers Pipeline (không cần vLLM).
+    Tải Gemini API - nhanh, miễn phí, không cần GPU.
     """
-    print(f"Bắt đầu tải mô hình: {config.LLM_MODEL_NAME} (chế độ Transformers)")
+    print(f"Bắt đầu kết nối Gemini API: {config.LLM_MODEL_NAME}")
     
-    # Sử dụng quantization nếu có GPU
-    quantization_config = None
-    if torch.cuda.is_available():
-        quantization_config = BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_compute_dtype=torch.bfloat16,
-        )
-        print("🚀 Sử dụng 4-bit quantization cho GPU")
-    else:
-        print("💻 Chạy trên CPU (không quantization)")
-
-    tokenizer = AutoTokenizer.from_pretrained(
-        config.LLM_MODEL_NAME,
-        cache_dir=config.MODEL_CACHE_DIR,
-    )
-
-    model = AutoModelForCausalLM.from_pretrained(
-        config.LLM_MODEL_NAME,
-        quantization_config=quantization_config,
-        device_map="auto" if torch.cuda.is_available() else None,
-        cache_dir=config.MODEL_CACHE_DIR,
-        torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32
+    if not config.GOOGLE_API_KEY:
+        raise ValueError("❌ Chưa set GOOGLE_API_KEY trong file .env")
+    
+    # Configure Gemini
+    genai.configure(api_key=config.GOOGLE_API_KEY)
+    
+    # Tạo LangChain Gemini LLM với cấu hình đầy đủ
+    llm = ChatGoogleGenerativeAI(
+        model=config.LLM_MODEL_NAME,
+        google_api_key=config.GOOGLE_API_KEY,
+        temperature=0.8,
+        max_output_tokens=8192,  # Tăng lên để đủ chỗ cho reasoning + response
+        convert_system_message_to_human=True,
+        top_p=0.95,
+        top_k=40
     )
     
-    print("✅ Tải mô hình LLM thành công (Transformers Pipeline).")
-
-    # Add pad token if missing
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-    
-    text_generator = pipeline(
-        "text-generation",
-        model=model,
-        tokenizer=tokenizer,
-        max_new_tokens=256,  # Giảm từ 512 xuống 256
-        do_sample=True,
-        temperature=0.7,  # Tăng để nhanh hơn
-        top_p=0.9,
-        return_full_text=False,
-        pad_token_id=tokenizer.eos_token_id
-    )
-    
-    return HuggingFacePipeline(pipeline=text_generator)
-
-def load_embedding_model():
-    """Tải mô hình embedding."""
-    print(f"Bắt đầu tải embedding: {config.EMBEDDING_MODEL_NAME}")
-    embeddings = HuggingFaceEmbeddings(
-        model_name=config.EMBEDDING_MODEL_NAME,
-        model_kwargs={'device': 'cuda'},
-        cache_folder=config.MODEL_CACHE_DIR
-    )
-    print("✅ Mô hình Embedding đã sẵn sàng.")
-    return embeddings
-
-# services.py
-
-# ... (Hàm load_llm_pipeline và load_embedding_model giữ nguyên) ...
+    print("✅ Kết nối Gemini API thành công!")
+    return llm
 
 def create_database_connection():
     """
@@ -157,27 +63,6 @@ def create_database_connection():
     except Exception as e:
         print(f"❌ Lỗi kết nối database: {e}")
         return None, None
-
-def query_database_direct(engine, query_text):
-    """
-    Thực thi truy vấn SQL trực tiếp và trả về kết quả.
-    """
-    try:
-        with engine.connect() as conn:
-            result = conn.execute(text(query_text))
-            rows = result.fetchall()
-            
-            # Chuyển đổi thành list of dict
-            data = []
-            for row in rows:
-                # Convert Row to dict
-                row_dict = row._asdict() if hasattr(row, '_asdict') else dict(row._mapping)
-                data.append(row_dict)
-            
-            return data
-    except Exception as e:
-        print(f"❌ Lỗi thực thi query: {e}")
-        return []
 
 def get_product_info_from_db(engine, search_term):
     """
@@ -247,8 +132,6 @@ def get_product_info_from_db(engine, search_term):
                     })
             
             return list(products.values())
-            
-            return products
             
     except Exception as e:
         print(f"❌ Lỗi tìm kiếm sản phẩm: {e}")
@@ -337,81 +220,23 @@ def get_order_info_from_db(engine, search_term):
         print(f"❌ Lỗi tìm kiếm đơn hàng: {e}")
         return []
 
-def create_rag_chain(llm, embeddings):
+def create_rag_chain(llm):
     """
-    Tự động QUÉT thư mục DATA_DIR, nạp TẤT CẢ các file (.csv, .pdf, .txt)
-    và xây dựng RAG chain với tích hợp database.
+    Tạo RAG chain chỉ sử dụng database, không đọc file.
     """
-    print(f"Bắt đầu quét thư mục kiến thức: {config.DATA_DIR}")
-    
-    all_documents = [] # List để chứa tất cả tài liệu
+    print("Khởi tạo RAG chain với database integration...")
 
-    # --- 1. QUÉT THƯ MỤC VÀ LOAD FILE ---
-    try:
-        # Lấy danh sách file trong thư mục DATA_DIR
-        filenames = os.listdir(config.DATA_DIR)
-        
-        for filename in filenames:
-            filepath = os.path.join(config.DATA_DIR, filename)
-            
-            # --- Xử lý file CSV (Logic cũ của bạn) ---
-            if filename.endswith(".csv"):
-                print(f"  [CSV] Đang xử lý file: {filename}")
-                df = pd.read_csv(filepath)
-                for _, row in df.iterrows():
-                    content = f"Tên: {row['product_name']}\n"
-                    content += f"Loại: {row['category']}\n"
-                    if row['price'] > 0:
-                        content += f"Giá: {row['price']:,} VNĐ\n"
-                    content += f"Mô tả: {row['description']}"
-                    doc = Document(page_content=content, metadata={"source": filename})
-                    all_documents.append(doc)
-
-            # --- Xử lý file Text ---
-            elif filename.endswith(".txt"):
-                print(f"  [TXT] Đang xử lý file: {filename}")
-                with open(filepath, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                doc = Document(page_content=content, metadata={"source": filename})
-                all_documents.append(doc)
-
-            # --- Bỏ qua PDF tạm thời để tránh lỗi dependency ---
-            elif filename.endswith(".pdf"):
-                print(f"  [PDF] Bỏ qua file PDF: {filename} (chưa hỗ trợ)")
-            
-            else:
-                print(f"  [SKIP] Bỏ qua file không hỗ trợ: {filename}")
-
-    except FileNotFoundError:
-        print(f"⚠️ LỖI: Không tìm thấy thư mục {config.DATA_DIR}.")
-    except Exception as e:
-        print(f"⚠️ LỖI khi quét thư mục: {e}")
-
-    # --- 2. KIỂM TRA DỮ LIỆU ---
-    if not all_documents:
-        print("⚠️ CẢNH BÁO: Không nạp được bất kỳ tài liệu nào. Bot sẽ không có kiến thức.")
-        # Tạo một tài liệu rỗng để tránh lỗi
-        all_documents = [Document(page_content="Không có kiến thức.")]
-
-    print(all_documents[0:2]) # In 2 tài liệu đầu để kiểm tra
-
-    # --- 3. TẠO VECTOR STORE (Như cũ) ---
-    print("Khởi tạo Vector Store FAISS...")
-    vector_store = FAISS.from_documents(all_documents, embeddings)
-    retriever = vector_store.as_retriever(search_kwargs={"k": 2}) # Lấy 2 kết quả
-    print("✅ Vector Store FAISS và Retriever đã sẵn sàng.")
-
-    # --- 4. TẠO DATABASE CONNECTION ---
+    # TẠO DATABASE CONNECTION
     sql_database, engine = create_database_connection()
 
-    # --- 5. TẠO HYBRID RETRIEVER ---
+    # TẠO DATABASE-ONLY RETRIEVER
     def hybrid_retriever(question):
         """
-        Kết hợp tìm kiếm vector và database query.
+        Chỉ sử dụng database query, không dùng vector search.
         """
         question_lower = question.lower().strip()
         
-        # Fast-path: Xử lý câu chào - trả về response cố định
+        # Fast-path: Xử lý câu chào
         greetings = ['xin chào', 'hello', 'hi', 'chào', 'hey', 'chào shop', 'alo']
         if any(greeting in question_lower for greeting in greetings) and len(question) < 30:
             return [Document(
@@ -426,16 +251,14 @@ def create_rag_chain(llm, embeddings):
                 page_content="Khách hàng cảm ơn. Trả lời: 'Dạ, cảm ơn anh/chị đã ghé thăm cửa hàng, anh/Chị có cần em tư vấn thêm gì không ạ?'",
                 metadata={"source": "thanks"}
             )]
+        
+        # Xử lý mã đơn hàng đơn lẻ
         order_only_pattern = r'^ORD\d+$'
         if re.match(order_only_pattern, question.upper().strip()):
-            # Chuyển sang tìm kiếm đơn hàng - cập nhật cả question và question_lower
             question = 'đơn hàng ' + question
             question_lower = question.lower()
-            
-        # 1. Tìm kiếm từ vector store
-        vector_results = retriever.invoke(question)
         
-        # 2. Tìm kiếm từ database nếu có kết nối
+        # Tìm kiếm từ database
         db_results = []
         if engine:
             # Phát hiện loại câu hỏi và tìm kiếm phù hợp
@@ -502,27 +325,27 @@ def create_rag_chain(llm, embeddings):
                     
                     db_results.append(Document(page_content=content, metadata={"source": "database_orders"}))
         
-        # 3. Kết hợp kết quả
-        all_results = vector_results + db_results
-        return all_results[:3]  # Giới hạn 3 kết quả
+        # Trả về kết quả từ database
+        return db_results[:3] if db_results else [Document(
+            page_content="",
+            metadata={"source": "empty"}
+        )]
 
-    # --- 6. TẠO PROMPT VÀ CHAIN ---
-    rag_template = """<s>[INST] Bạn là trợ lý AI của shop thời trang. Trả lời CHÍNH XÁC dựa trên dữ liệu được cung cấp.
+    # TẠO PROMPT VÀ CHAIN
+    rag_template = """Bạn là nhân viên tư vấn của shop thời trang. Hãy đọc kỹ thông tin bên dưới và trả lời câu hỏi.
 
-QUY TẮC BẮT BUỘC:
-1. CHỈ sử dụng thông tin từ "Nội dung" bên dưới
-2. KHÔNG được tự bịa hoặc đoán thông tin
-3. Nếu không có đủ thông tin: "Em không tìm thấy thông tin về [nội dung] ạ"
-4. Xưng hô: tự xưng "em", gọi khách "anh/chị"
-5. Kết thúc: "Anh/Chị có cần em tư vấn thêm gì không ạ?"
-
-Nội dung (ĐỌC KỸ và SỬ DỤNG):
+THÔNG TIN SẢN PHẨM/ĐƠN HÀNG:
 {context}
 
-Câu hỏi: {question}
+CÂUH HỎI: {question}
 
-Hãy trả lời DỰA TRÊN Nội dung phía trên, không được tự bịa: [/INST]
-"""
+CÁCH TRẢ LỜI:
+1. Đọc kỹ thông tin ở phần "THÔNG TIN SẢN PHẨM/ĐƠN HÀNG"
+2. Trả lời dựa trên thông tin đó
+3. Xưng "em", gọi khách "anh/chị"
+4. Kết thúc: "Anh/Chị có cần em tư vấn thêm gì không ạ?"
+
+HÃY TRẢ LỜI NGAY BÂY GIỜ:"""
     rag_prompt = PromptTemplate.from_template(rag_template)
 
     def format_docs(docs):
@@ -533,14 +356,33 @@ Hãy trả lời DỰA TRÊN Nội dung phía trên, không được tự bịa:
         """Retrieve và format context từ hybrid retriever."""
         question = inputs if isinstance(inputs, str) else inputs.get("question", "")
         docs = hybrid_retriever(question)
-        return format_docs(docs)
+        formatted = format_docs(docs)
+        print(f"📝 DEBUG Context gửi cho Gemini:\n{formatted[:500]}...")
+        return formatted
 
-    # RunnableLambda already imported at top
+    # Custom wrapper để log response từ LLM
+    def debug_llm_call(prompt_value):
+        """Gọi LLM và log response."""
+        try:
+            print(f"🤖 DEBUG Prompt gửi cho LLM:\n{str(prompt_value)[:300]}...")
+            response = llm.invoke(prompt_value)
+            print(f"✅ DEBUG Response type: {type(response)}")
+            print(f"✅ DEBUG Response obj: {response}")
+            if hasattr(response, 'content'):
+                print(f"✅ DEBUG Response.content length: {len(response.content)}")
+                print(f"✅ DEBUG Response.content: '{response.content}'")
+            return response
+        except Exception as e:
+            print(f"❌ ERROR calling LLM: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
     
+    # RunnableLambda already imported at top
     rag_chain = (
         RunnableLambda(lambda x: {"context": enhanced_context_retriever(x), "question": x})
         | rag_prompt
-        | llm
+        | RunnableLambda(debug_llm_call)
         | StrOutputParser()
     )
     print("✅ Pipeline RAG với database integration hoàn chỉnh đã sẵn sàng.")

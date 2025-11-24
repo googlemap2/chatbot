@@ -9,13 +9,12 @@ from langchain_core.prompts import PromptTemplate
 from langchain_core.runnables import RunnablePassthrough, RunnableLambda
 from langchain_core.output_parsers import StrOutputParser
 from huggingface_hub import login
-# from langchain_community.llms import VLLM  # Bỏ vLLM
 import pandas as pd
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from sqlalchemy import create_engine, text
 import json
-
+import re
 # Import cấu hình từ file config.py
 import config
 
@@ -203,6 +202,7 @@ def get_product_info_from_db(engine, search_term):
     WHERE LOWER(p.name) LIKE LOWER(:search1) 
        OR LOWER(p.description) LIKE LOWER(:search2)
        OR LOWER(c.name) LIKE LOWER(:search3)
+       OR LOWER(pv.sku) LIKE LOWER(:search4)
     ORDER BY p.id, pv.id
     LIMIT 10
     """
@@ -213,7 +213,8 @@ def get_product_info_from_db(engine, search_term):
             result = conn.execute(text(query), {
                 'search1': search_pattern,
                 'search2': search_pattern, 
-                'search3': search_pattern
+                'search3': search_pattern,
+                'search4': search_pattern
             })
             rows = result.fetchall()
             
@@ -257,6 +258,15 @@ def get_order_info_from_db(engine, search_term):
     """
     Tìm kiếm thông tin đơn hàng từ database.
     """
+    # Map trạng thái từ database sang tiếng Việt
+    STATUS_MAP = {
+        'pending': 'Chờ xác nhận',
+        'confirmed': 'Đã xác nhận',
+        'shipping': 'Đang giao hàng',
+        'delivered': 'Đã giao hàng',
+        'cancelled': 'Đã hủy'
+    }
+    
     query = """
     SELECT 
         o.id,
@@ -299,13 +309,16 @@ def get_order_info_from_db(engine, search_term):
                 
                 order_id = row_dict['id']
                 if order_id not in orders:
+                    # Map trạng thái sang tiếng Việt
+                    status_vi = STATUS_MAP.get(row_dict['status'].lower(), row_dict['status'])
+                    
                     orders[order_id] = {
                         'id': row_dict['id'],
                         'order_number': row_dict['order_number'],
                         'customer_name': row_dict['full_name'],
                         'phone': row_dict['phone'],
                         'email': row_dict['email'],
-                        'status': row_dict['status'],
+                        'status': status_vi,
                         'created_at': row_dict['created_at'],
                         'items': []
                     }
@@ -396,6 +409,29 @@ def create_rag_chain(llm, embeddings):
         """
         Kết hợp tìm kiếm vector và database query.
         """
+        question_lower = question.lower().strip()
+        
+        # Fast-path: Xử lý câu chào - trả về response cố định
+        greetings = ['xin chào', 'hello', 'hi', 'chào', 'hey', 'chào shop', 'alo']
+        if any(greeting in question_lower for greeting in greetings) and len(question) < 30:
+            return [Document(
+                page_content="Khách hàng chào hỏi. Trả lời: 'Dạ, chào anh/chị! Shop em bán quần áo thời trang, anh/Chị cần em tư vấn gì ạ?'",
+                metadata={"source": "greeting"}
+            )]
+        
+        # Fast-path: Xử lý câu cảm ơn
+        thanks = ['cảm ơn', 'thank', 'thanks', 'cám ơn', 'cam on']
+        if any(thank in question_lower for thank in thanks):
+            return [Document(
+                page_content="Khách hàng cảm ơn. Trả lời: 'Dạ, cảm ơn anh/chị đã ghé thăm cửa hàng, anh/Chị có cần em tư vấn thêm gì không ạ?'",
+                metadata={"source": "thanks"}
+            )]
+        order_only_pattern = r'^ORD\d+$'
+        if re.match(order_only_pattern, question.upper().strip()):
+            # Chuyển sang tìm kiếm đơn hàng - cập nhật cả question và question_lower
+            question = 'đơn hàng ' + question
+            question_lower = question.lower()
+            
         # 1. Tìm kiếm từ vector store
         vector_results = retriever.invoke(question)
         
@@ -406,9 +442,29 @@ def create_rag_chain(llm, embeddings):
             question_lower = question.lower()
             
             # Câu hỏi về sản phẩm
-            if any(keyword in question_lower for keyword in ['sản phẩm', 'áo', 'quần', 'giá', 'mua', 'bán']):
-                products = get_product_info_from_db(engine, question)
+            if any(keyword in question_lower for keyword in ['sản phẩm', 'áo', 'quần', 'giá', 'mua', 'bán', 'tìm']):
+                # Extract tên sản phẩm hoặc mã SKU
+                # Pattern 1: Tìm SKU (có dấu gạch ngang: ATN-PREMIUM-S-BLACK)
+                sku_pattern = r'\b[A-Z0-9]+-[A-Z0-9-]+\b'
+                sku_match = re.search(sku_pattern, question.upper())
+                
+                # Pattern 2: Tìm từ khóa sau "sản phẩm", "tìm", "có"
+                keyword_pattern = r'(?:sản phẩm|tìm|có|mua|bán)\s+(.+?)(?:\s+không|\s+có|\s*$)'
+                keyword_match = re.search(keyword_pattern, question_lower, re.IGNORECASE)
+                
+                # Ưu tiên SKU, nếu không có thì dùng keyword
+                if sku_match:
+                    search_term = sku_match.group(0)
+                elif keyword_match:
+                    search_term = keyword_match.group(1).strip()
+                else:
+                    search_term = question
+                
+                print(f"🔍 DEBUG: Tìm kiếm sản phẩm với từ khóa: '{search_term}'")
+                products = get_product_info_from_db(engine, search_term)
+                print(f"🔍 DEBUG: Tìm thấy {len(products)} sản phẩm")
                 for product in products[:3]:  # Chỉ lấy 3 sản phẩm đầu
+                    print(f"🔍 DEBUG: Sản phẩm: {product['name']}, Giá: {product['price']}")
                     content = f"Sản phẩm: {product['name']}\n"
                     content += f"Danh mục: {product['category']}\n"
                     content += f"Giá gốc: {product['price']:,.0f} VNĐ\n"
@@ -425,8 +481,15 @@ def create_rag_chain(llm, embeddings):
             
             # Câu hỏi về đơn hàng
             elif any(keyword in question_lower for keyword in ['đơn hàng', 'order', 'mua', 'khách hàng']):
-                orders = get_order_info_from_db(engine, question)
+                # Extract mã đơn hàng nếu có (ORD...)
+                order_code_match = re.search(r'ORD\d+', question.upper())
+                search_term = order_code_match.group(0) if order_code_match else question
+                
+                print(f"🔍 DEBUG: Tìm kiếm đơn hàng với từ khóa: '{search_term}'")
+                orders = get_order_info_from_db(engine, search_term)
+                print(f"🔍 DEBUG: Tìm thấy {len(orders)} đơn hàng")
                 for order in orders[:2]:  # Chỉ lấy 2 đơn hàng đầu
+                    print(f"🔍 DEBUG: Đơn hàng {order['order_number']}, trạng thái: {order['status']}")
                     content = f"Đơn hàng: {order['order_number']}\n"
                     content += f"Khách hàng: {order['customer_name']}\n"
                     content += f"Điện thoại: {order['phone']}\n"
@@ -443,12 +506,22 @@ def create_rag_chain(llm, embeddings):
         all_results = vector_results + db_results
         return all_results[:3]  # Giới hạn 3 kết quả
 
-    # --- 6. TẠO PROMPT VÀ CHAIN (Cải tiến) ---
-    rag_template = """<s>[INST] Bạn là trợ lý AI shop thời trang. Trả lời ngắn gọn bằng tiếng Việt dựa vào thông tin sau:
+    # --- 6. TẠO PROMPT VÀ CHAIN ---
+    rag_template = """<s>[INST] Bạn là trợ lý AI của shop thời trang. Trả lời CHÍNH XÁC dựa trên dữ liệu được cung cấp.
 
+QUY TẮC BẮT BUỘC:
+1. CHỈ sử dụng thông tin từ "Nội dung" bên dưới
+2. KHÔNG được tự bịa hoặc đoán thông tin
+3. Nếu không có đủ thông tin: "Em không tìm thấy thông tin về [nội dung] ạ"
+4. Xưng hô: tự xưng "em", gọi khách "anh/chị"
+5. Kết thúc: "Anh/Chị có cần em tư vấn thêm gì không ạ?"
+
+Nội dung (ĐỌC KỸ và SỬ DỤNG):
 {context}
 
-Câu hỏi: {question} [/INST]
+Câu hỏi: {question}
+
+Hãy trả lời DỰA TRÊN Nội dung phía trên, không được tự bịa: [/INST]
 """
     rag_prompt = PromptTemplate.from_template(rag_template)
 

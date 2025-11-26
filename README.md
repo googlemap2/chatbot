@@ -1,4 +1,5 @@
-Kích hoạt môi trường ảo: source venv/bin/activate
+Kích hoạt môi trường ảo linux: source venv/bin/activate
+Kích hoạt môi trường window: .\venv\Scripts\Activate.ps1
 Thoát venv: deactivate
 pip freeze > requirements.txt
 
@@ -6,12 +7,6 @@ rm -rf venv
 python3.12 -m venv venv
 pip install --upgrade pip
 pip install -r requirements.txt
-
-pip install vllm
-
-# Source - https://stackoverflow.com/a
-# Posted by Samadhan Fuke
-# Retrieved 2025-11-24, License - CC BY-SA 4.0
 
 "models/embedding-gecko-001"
 "models/gemini-2.5-pro-preview-03-25"

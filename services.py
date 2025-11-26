@@ -387,3 +387,34 @@ HÃY TRẢ LỜI NGAY BÂY GIỜ:"""
     )
     print("✅ Pipeline RAG với database integration hoàn chỉnh đã sẵn sàng.")
     return rag_chain
+
+def save_chat_message(session_id, sender_type, message, user_id=None):
+    """
+    Lưu tin nhắn vào database.
+    """
+    try:
+        # Tạo connection mới (hoặc sử dụng engine global nếu muốn tối ưu)
+        _, engine = create_database_connection()
+        if not engine:
+            print("❌ Không thể kết nối DB để lưu tin nhắn")
+            return False
+
+        query = """
+        INSERT INTO chat_messages (session_id, sender_type, message, user_id)
+        VALUES (:session_id, :sender_type, :message, :user_id)
+        """
+        
+        with engine.begin() as conn:
+            conn.execute(text(query), {
+                'session_id': session_id,
+                'sender_type': sender_type,
+                'message': message,
+                'user_id': user_id
+            })
+            
+        print(f"💾 Đã lưu tin nhắn ({sender_type}): {message[:30]}...")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Lỗi lưu tin nhắn: {e}")
+        return False

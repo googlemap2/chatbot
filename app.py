@@ -77,7 +77,8 @@ def handle_send_message(data):
     
     try:
         message = data.get('message', '')
-        session_id = data.get('session_id', 'unknown')
+        session_id = data.get('session_id', None)
+        user_id = data.get('user_id', None)
         
         if not message:
             emit('error', {'message': 'Không tìm thấy message', 'session_id': session_id})
@@ -92,14 +93,16 @@ def handle_send_message(data):
         })
         
         # Gọi RAG chain
-        response = rag_chain.invoke(message)
-        
-        print(f"[Socket.IO] Session {session_id} - Trả lời: {response}")
+        services.save_chat_message(session_id, 'user', message, user_id)
+        answer = rag_chain.invoke(message)
+        services.save_chat_message(session_id, 'bot', answer, user_id)
+        print(f"[Socket.IO] Session {session_id} - Trả lời: {answer}")
+                
         
         # Push câu trả lời về client
         emit('message_response', {
             'message': message,
-            'answer': response,
+            'answer': answer,
             'session_id': session_id
         })
         
@@ -140,180 +143,10 @@ def handle_socket_question(data):
     except Exception as e:
         print(f"[Socket.IO LỖI] {str(e)}")
         emit('error', {'message': f'Lỗi: {str(e)}'})
-
-@app.route('/')
-def index():
-    """Trang demo client Socket.IO"""
-    return render_template_string(CLIENT_HTML)
-
-# --- HTML Client Demo ---
-CLIENT_HTML = '''
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <title>Chatbot với Socket.IO</title>
-    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            max-width: 800px;
-            margin: 50px auto;
-            padding: 20px;
-        }
-        #messages {
-            border: 1px solid #ccc;
-            height: 400px;
-            overflow-y: auto;
-            padding: 10px;
-            margin-bottom: 20px;
-            background-color: #f9f9f9;
-        }
-        .message {
-            margin: 10px 0;
-            padding: 10px;
-            border-radius: 5px;
-        }
-        .user-message {
-            background-color: #e3f2fd;
-            text-align: right;
-        }
-        .bot-message {
-            background-color: #f1f8e9;
-        }
-        .status-message {
-            background-color: #fff3e0;
-            font-style: italic;
-            color: #666;
-        }
-        .error-message {
-            background-color: #ffebee;
-            color: #c62828;
-        }
-        #input-container {
-            display: flex;
-            gap: 10px;
-        }
-        #question-input {
-            flex: 1;
-            padding: 10px;
-            font-size: 16px;
-        }
-        #send-button {
-            padding: 10px 20px;
-            font-size: 16px;
-            background-color: #4CAF50;
-            color: white;
-            border: none;
-            cursor: pointer;
-        }
-        #send-button:disabled {
-            background-color: #ccc;
-            cursor: not-allowed;
-        }
-        #status {
-            margin-bottom: 10px;
-            padding: 10px;
-            border-radius: 5px;
-            font-weight: bold;
-        }
-        .connected {
-            background-color: #c8e6c9;
-            color: #2e7d32;
-        }
-        .disconnected {
-            background-color: #ffcdd2;
-            color: #c62828;
-        }
-    </style>
-</head>
-<body>
-    <h1>🤖 Chatbot với Socket.IO Push</h1>
-    <div id="status" class="disconnected">Chưa kết nối</div>
-    <div id="messages"></div>
-    <div id="input-container">
-        <input type="text" id="question-input" placeholder="Nhập câu hỏi của bạn..." disabled>
-        <button id="send-button" disabled>Gửi</button>
-    </div>
-
-    <script>
-        const socket = io();
-        const messagesDiv = document.getElementById('messages');
-        const statusDiv = document.getElementById('status');
-        const questionInput = document.getElementById('question-input');
-        const sendButton = document.getElementById('send-button');
-
-        function addMessage(text, className) {
-            const messageDiv = document.createElement('div');
-            messageDiv.className = 'message ' + className;
-            messageDiv.textContent = text;
-            messagesDiv.appendChild(messageDiv);
-            messagesDiv.scrollTop = messagesDiv.scrollHeight;
-        }
-
-        socket.on('connect', () => {
-            console.log('Đã kết nối với server');
-            statusDiv.textContent = 'Đã kết nối ✓';
-            statusDiv.className = 'connected';
-            questionInput.disabled = false;
-            sendButton.disabled = false;
-        });
-
-        socket.on('disconnect', () => {
-            console.log('Đã ngắt kết nối với server');
-            statusDiv.textContent = 'Mất kết nối ✗';
-            statusDiv.className = 'disconnected';
-            questionInput.disabled = true;
-            sendButton.disabled = true;
-            addMessage('Đã mất kết nối với server', 'error-message');
-        });
-
-        socket.on('connected', (data) => {
-            addMessage(data.message, 'status-message');
-        });
-
-        socket.on('processing', (data) => {
-            addMessage(data.message, 'status-message');
-        });
-
-        socket.on('answer', (data) => {
-            addMessage('Bot: ' + data.answer, 'bot-message');
-            sendButton.disabled = false;
-            questionInput.value = '';
-            questionInput.focus();
-        });
-
-        socket.on('error', (data) => {
-            addMessage('Lỗi: ' + data.message, 'error-message');
-            sendButton.disabled = false;
-        });
-
-        function sendQuestion() {
-            const question = questionInput.value.trim();
-            if (question) {
-                addMessage('Bạn: ' + question, 'user-message');
-                socket.emit('ask_question', { question: question });
-                sendButton.disabled = true;
-            }
-        }
-
-        sendButton.addEventListener('click', sendQuestion);
-
-        questionInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
-                sendQuestion();
-            }
-        });
-    </script>
-</body>
-</html>
-'''
-
 # --- Chạy Server ---
 if __name__ == "__main__":
     print("🚀 Bắt đầu chạy server API tại http://0.0.0.0:5000")
     print("📡 Socket.IO đã được kích hoạt")
-    print("🌐 Mở trình duyệt tại http://localhost:5000 để test client")
     print("📮 REST API endpoint: POST http://0.0.0.0:5000/ask")
     # Sử dụng socketio.run thay vì app.run
     socketio.run(app, host='0.0.0.0', port=5000, debug=False, allow_unsafe_werkzeug=True)

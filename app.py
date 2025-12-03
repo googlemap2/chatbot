@@ -15,7 +15,7 @@ try:
     
     rag_chain = services.create_rag_chain(llm)
     
-    print("🎉🎉🎉 Server đã sẵn sàng nhận request! 🎉🎉🎉")
+    print("Server đã sẵn sàng!")
 
 except Exception as e:
     print(f"FATAL ERROR: Không thể khởi tạo mô hình. Lỗi: {e}")
@@ -103,7 +103,7 @@ def handle_socket_question(data):
         
         print(f"\n[Socket.IO] Đã nhận câu hỏi: {question}")
         
-        emit('processing', {'message': 'Đang xử lý câu hỏi của bạn...'})
+        emit('processing', {'message': 'Đang xử lý câu hỏi...'})
         
         response = rag_chain.invoke(question)
         
@@ -116,7 +116,7 @@ def handle_socket_question(data):
         emit('error', {'message': f'Lỗi: {str(e)}'})
 
 if __name__ == "__main__":
-    print("🚀 Bắt đầu chạy server API tại http://0.0.0.0:5000")
-    print("📡 Socket.IO đã được kích hoạt")
-    print("📮 REST API endpoint: POST http://0.0.0.0:5000/ask")
+    print("Bắt đầu chạy server API tại http://0.0.0.0:5000")
+    print("Socket.IO đã được kích hoạt")
+    print("REST API endpoint: POST http://0.0.0.0:5000/ask")
     socketio.run(app, host='0.0.0.0', port=5000, debug=False, allow_unsafe_werkzeug=True)

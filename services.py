@@ -12,7 +12,7 @@ def load_llm_pipeline():
     print(f"Bắt đầu kết nối Gemini API: {config.LLM_MODEL_NAME}")
     
     if not config.GOOGLE_API_KEY:
-        raise ValueError("❌ Chưa set GOOGLE_API_KEY trong file .env")
+        raise ValueError("Chưa set GOOGLE_API_KEY trong file .env")
     
     genai.configure(api_key=config.GOOGLE_API_KEY)
     
@@ -26,14 +26,14 @@ def load_llm_pipeline():
         top_k=40
     )
     
-    print("✅ Kết nối Gemini API thành công!")
+    print("Kết nối Gemini API thành công!")
     return llm
 
 def create_database_connection():
     try:
         database_url = config.DATABASE_URL
         if not database_url:
-            print("❌ Không tìm thấy DATABASE_URL trong file .env")
+            print("Không tìm thấy DATABASE_URL trong file .env")
             return None, None
         
         engine = create_engine(
@@ -46,11 +46,11 @@ def create_database_connection():
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
         
-        print("✅ Kết nối database thành công!")
+        print("Kết nối database thành công!")
         return None, engine
         
     except Exception as e:
-        print(f"❌ Lỗi kết nối database: {e}")
+        print(f"Lỗi kết nối database: {e}")
         return None, None
 
 def get_product_info_from_db(engine, search_term):
@@ -117,7 +117,7 @@ def get_product_info_from_db(engine, search_term):
             return list(products.values())
             
     except Exception as e:
-        print(f"❌ Lỗi tìm kiếm sản phẩm: {e}")
+        print(f"Lỗi tìm kiếm sản phẩm: {e}")
         return []
 
 def get_order_info_from_db(engine, search_term):
@@ -133,9 +133,6 @@ def get_order_info_from_db(engine, search_term):
     SELECT 
         o.id,
         o.order_number,
-        o.full_name,
-        o.phone,
-        o.email,
         o.status,
         o.created_at,
         oi.product_name,
@@ -174,9 +171,6 @@ def get_order_info_from_db(engine, search_term):
                     orders[order_id] = {
                         'id': row_dict['id'],
                         'order_number': row_dict['order_number'],
-                        'customer_name': row_dict['full_name'],
-                        'phone': row_dict['phone'],
-                        'email': row_dict['email'],
                         'status': status_vi,
                         'created_at': row_dict['created_at'],
                         'items': []
@@ -193,7 +187,7 @@ def get_order_info_from_db(engine, search_term):
             return list(orders.values())
             
     except Exception as e:
-        print(f"❌ Lỗi tìm kiếm đơn hàng: {e}")
+        print(f"Lỗi tìm kiếm đơn hàng: {e}")
         return []
 
 def create_rag_chain(llm):
@@ -241,11 +235,11 @@ def create_rag_chain(llm):
                 else:
                     search_term = question
                 
-                print(f"🔍 DEBUG: Tìm kiếm sản phẩm với từ khóa: '{search_term}'")
+                print(f"DEBUG: Tìm kiếm sản phẩm với từ khóa: '{search_term}'")
                 products = get_product_info_from_db(engine, search_term)
-                print(f"🔍 DEBUG: Tìm thấy {len(products)} sản phẩm")
+                print(f"DEBUG: Tìm thấy {len(products)} sản phẩm")
                 for product in products[:3]:
-                    print(f"🔍 DEBUG: Sản phẩm: {product['name']}, Giá: {product['price']}")
+                    print(f"DEBUG: Sản phẩm: {product['name']}, Giá: {product['price']}")
                     content = f"Sản phẩm: {product['name']}\n"
                     content += f"Danh mục: {product['category']}\n"
                     content += f"Giá gốc: {product['price']:,.0f} VNĐ\n"
@@ -264,11 +258,11 @@ def create_rag_chain(llm):
                 order_code_match = re.search(r'ORD\d+', question.upper())
                 search_term = order_code_match.group(0) if order_code_match else question
                 
-                print(f"🔍 DEBUG: Tìm kiếm đơn hàng với từ khóa: '{search_term}'")
+                print(f"DEBUG: Tìm kiếm đơn hàng với từ khóa: '{search_term}'")
                 orders = get_order_info_from_db(engine, search_term)
-                print(f"🔍 DEBUG: Tìm thấy {len(orders)} đơn hàng")
+                print(f"DEBUG: Tìm thấy {len(orders)} đơn hàng")
                 for order in orders[:2]:
-                    print(f"🔍 DEBUG: Đơn hàng {order['order_number']}, trạng thái: {order['status']}")
+                    print(f"DEBUG: Đơn hàng {order['order_number']}, trạng thái: {order['status']}")
                     content = f"Đơn hàng: {order['order_number']}\n"
                     content += f"Khách hàng: {order['customer_name']}\n"
                     content += f"Điện thoại: {order['phone']}\n"
@@ -309,21 +303,21 @@ HÃY TRẢ LỜI NGAY BÂY GIỜ:"""
         question = inputs if isinstance(inputs, str) else inputs.get("question", "")
         docs = hybrid_retriever(question)
         formatted = format_docs(docs)
-        print(f"📝 DEBUG Context gửi cho Gemini:\n{formatted[:500]}...")
+        print(f"DEBUG Context gửi cho Gemini:\n{formatted[:500]}...")
         return formatted
 
     def debug_llm_call(prompt_value):
         try:
-            print(f"🤖 DEBUG Prompt gửi cho LLM:\n{str(prompt_value)[:300]}...")
+            print(f"DEBUG Prompt gửi cho LLM:\n{str(prompt_value)[:300]}...")
             response = llm.invoke(prompt_value)
-            print(f"✅ DEBUG Response type: {type(response)}")
-            print(f"✅ DEBUG Response obj: {response}")
+            print(f"DEBUG Response type: {type(response)}")
+            print(f"DEBUG Response obj: {response}")
             if hasattr(response, 'content'):
-                print(f"✅ DEBUG Response.content length: {len(response.content)}")
-                print(f"✅ DEBUG Response.content: '{response.content}'")
+                print(f"DEBUG Response.content length: {len(response.content)}")
+                print(f"DEBUG Response.content: '{response.content}'")
             return response
         except Exception as e:
-            print(f"❌ ERROR calling LLM: {e}")
+            print(f"ERROR calling LLM: {e}")
             import traceback
             traceback.print_exc()
             raise
@@ -334,14 +328,14 @@ HÃY TRẢ LỜI NGAY BÂY GIỜ:"""
         | RunnableLambda(debug_llm_call)
         | StrOutputParser()
     )
-    print("✅ Pipeline RAG với database integration hoàn chỉnh đã sẵn sàng.")
+    print("Pipeline RAG với database integration hoàn chỉnh đã sẵn sàng.")
     return rag_chain
 
 def save_chat_message(session_id, sender_type, message, user_id=None):
     try:
         _, engine = create_database_connection()
         if not engine:
-            print("❌ Không thể kết nối DB để lưu tin nhắn")
+            print("Không thể kết nối DB để lưu tin nhắn")
             return False
 
         query = """
@@ -357,9 +351,9 @@ def save_chat_message(session_id, sender_type, message, user_id=None):
                 'user_id': user_id
             })
             
-        print(f"💾 Đã lưu tin nhắn ({sender_type}): {message[:30]}...")
+        print(f"Đã lưu tin nhắn ({sender_type}): {message[:30]}...")
         return True
         
     except Exception as e:
-        print(f"❌ Lỗi lưu tin nhắn: {e}")
+        print(f"Lỗi lưu tin nhắn: {e}")
         return False

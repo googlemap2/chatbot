@@ -5,26 +5,27 @@ import sys
 import threading
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'your-secret-key-here'
+app.config["SECRET_KEY"] = "your-secret-key-here"
 socketio = SocketIO(app, cors_allowed_origins="*")
 print("Khởi tạo Flask server với Socket.IO...")
 
 print("Bắt đầu quá trình khởi tạo mô hình AI...")
 try:
     llm = services.load_llm_pipeline()
-    
+
     rag_chain = services.create_rag_chain(llm)
-    
+
     print("Server đã sẵn sàng!")
 
 except Exception as e:
     print(f"FATAL ERROR: Không thể khởi tạo mô hình. Lỗi: {e}")
     sys.exit(1)
 
+
 @app.route("/ask", methods=["POST"])
 def handle_ask():
     global rag_chain
-    
+
     try:
         data = request.json
         if not data or "question" not in data:
@@ -33,90 +34,135 @@ def handle_ask():
 
         question = data["question"]
         print(f"\n[API] Đã nhận câu hỏi: {question}")
-        
+
+        # Kiểm tra ngôn ngữ
+        if not services.is_vietnamese(question):
+            print(f"[API] Từ chối - Không phải tiếng Việt: {question}")
+            return jsonify(
+                {
+                    "answer": "Xin lỗi, em chỉ hỗ trợ trả lời bằng tiếng Việt ạ. Anh/chị vui lòng nhắn tin bằng tiếng Việt nhé!"
+                }
+            )
+
         response = rag_chain.invoke(question)
-        
+
         print(f"[API] Đang trả lời: {response}")
-        
+
         return jsonify({"answer": response})
 
     except Exception as e:
         print(f"[API LỖI] {str(e)}")
         return jsonify({"error": f"Đã xảy ra lỗi server: {str(e)}"}), 500
 
-@socketio.on('connect')
+
+@socketio.on("connect")
 def handle_connect():
     print(f"[Socket.IO] Client đã kết nối: {request.sid}")
-    emit('connected', {'message': 'Đã kết nối thành công với server!'})
+    emit("connected", {"message": "Đã kết nối thành công với server!"})
 
-@socketio.on('disconnect')
+
+@socketio.on("disconnect")
 def handle_disconnect():
     print(f"[Socket.IO] Client đã ngắt kết nối: {request.sid}")
 
-@socketio.on('send_message')
+
+@socketio.on("send_message")
 def handle_send_message(data):
     global rag_chain
-    
+
     try:
-        message = data.get('message', '')
-        session_id = data.get('session_id', None)
-        user_id = data.get('user_id', None)
-        
+        message = data.get("message", "")
+        session_id = data.get("session_id", None)
+        user_id = data.get("user_id", None)
+
         if not message:
-            emit('error', {'message': 'Không tìm thấy message', 'session_id': session_id})
+            emit(
+                "error", {"message": "Không tìm thấy message", "session_id": session_id}
+            )
             return
-        
+
         print(f"\n[Socket.IO] Session {session_id} - Nhận message: {message}")
-        
-        emit('processing', {
-            'message': 'Đang xử lý câu hỏi của bạn...',
-            'session_id': session_id
-        })
-        
-        services.save_chat_message(session_id, 'user', message, user_id)
+
+        # Kiểm tra ngôn ngữ
+        if not services.is_vietnamese(message):
+            print(f"[Socket.IO] Từ chối - Không phải tiếng Việt: {message}")
+            emit(
+                "message_response",
+                {
+                    "message": message,
+                    "answer": "Xin lỗi, em chỉ hỗ trợ trả lời bằng tiếng Việt ạ. Anh/chị vui lòng nhắn tin bằng tiếng Việt nhé!",
+                    "session_id": session_id,
+                },
+            )
+            return
+
+        emit(
+            "processing",
+            {"message": "Đang xử lý câu hỏi của bạn...", "session_id": session_id},
+        )
+
+        services.save_chat_message(session_id, "user", message, user_id)
         answer = rag_chain.invoke(message)
-        services.save_chat_message(session_id, 'bot', answer, user_id)
+        services.save_chat_message(session_id, "bot", answer, user_id)
         print(f"[Socket.IO] Session {session_id} - Trả lời: {answer}")
-                
-        emit('message_response', {
-            'message': message,
-            'answer': answer,
-            'session_id': session_id
-        })
-        
+
+        emit(
+            "message_response",
+            {"message": message, "answer": answer, "session_id": session_id},
+        )
+
     except Exception as e:
         print(f"[Socket.IO LỖI] {str(e)}")
-        emit('error', {
-            'message': f'Lỗi: {str(e)}',
-            'session_id': data.get('session_id', 'unknown')
-        })
+        emit(
+            "error",
+            {
+                "message": f"Lỗi: {str(e)}",
+                "session_id": data.get("session_id", "unknown"),
+            },
+        )
 
-@socketio.on('ask_question')
+
+@socketio.on("ask_question")
 def handle_socket_question(data):
     global rag_chain
-    
+
     try:
-        question = data.get('question', '')
+        question = data.get("question", "")
         if not question:
-            emit('error', {'message': 'Không tìm thấy câu hỏi'})
+            emit("error", {"message": "Không tìm thấy câu hỏi"})
             return
-        
+
         print(f"\n[Socket.IO] Đã nhận câu hỏi: {question}")
-        
-        emit('processing', {'message': 'Đang xử lý câu hỏi...'})
-        
+
+        # Kiểm tra ngôn ngữ
+        if not services.is_vietnamese(question):
+            print(f"[Socket.IO] Từ chối - Không phải tiếng Việt: {question}")
+            emit(
+                "answer",
+                {
+                    "question": question,
+                    "answer": "Xin lỗi, em chỉ hỗ trợ trả lời bằng tiếng Việt ạ. Anh/chị vui lòng nhắn tin bằng tiếng Việt nhé!",
+                },
+            )
+            return
+
+        emit("processing", {"message": "Đang xử lý câu hỏi..."})
+
         response = rag_chain.invoke(question)
-        
+
         print(f"[Socket.IO] Đang trả lời: {response}")
-        
-        emit('answer', {'question': question, 'answer': response})
-        
+
+        emit("answer", {"question": question, "answer": response})
+
     except Exception as e:
         print(f"[Socket.IO LỖI] {str(e)}")
-        emit('error', {'message': f'Lỗi: {str(e)}'})
+        emit("error", {"message": f"Lỗi: {str(e)}"})
+
 
 if __name__ == "__main__":
     print("Bắt đầu chạy server API tại http://0.0.0.0:5000")
     print("Socket.IO đã được kích hoạt")
     print("REST API endpoint: POST http://0.0.0.0:5000/ask")
-    socketio.run(app, host='0.0.0.0', port=5000, debug=False, allow_unsafe_werkzeug=True)
+    socketio.run(
+        app, host="0.0.0.0", port=5000, debug=False, allow_unsafe_werkzeug=True
+    )

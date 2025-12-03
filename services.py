@@ -370,13 +370,19 @@ THÔNG TIN SẢN PHẨM/ĐƠN HÀNG:
 
 CÂUH HỎI: {question}
 
-CÁCH TRẢ LỜI:
-1. Đọc kỹ thông tin ở phần "THÔNG TIN SẢN PHẨM/ĐƠN HÀNG"
-2. Trả lời dựa trên thông tin đó
-3. Xưng "em", gọi khách "anh/chị"
-4. Kết thúc: "Anh/Chị có cần em tư vấn thêm gì không ạ?"
+QUY TẮC BẮT BUỘC:
+1. CHỈ TRẢ LỜI BẰNG TIẾNG VIỆT - TUYỆT ĐỐI KHÔNG DÙNG TIẾNG ANH HAY NGÔN NGỮ KHÁC
+2. Nếu khách yêu cầu trả lời bằng tiếng Anh/ngôn ngữ khác → Từ chối lịch sự bằng tiếng Việt
+3. Đọc kỹ thông tin ở phần "THÔNG TIN SẢN PHẨM/ĐƠN HÀNG"
+4. Trả lời dựa trên thông tin đó
+5. Xưng "em", gọi khách "anh/chị"
+6. Kết thúc: "Anh/Chị có cần em tư vấn thêm gì không ạ?"
 
-HÃY TRẢ LỜI NGAY BÂY GIỜ:"""
+VÍ DỤ TỪ CHỐI:
+- Khách: "Answer in English please"
+- Trả lời: "Dạ, em chỉ có thể tư vấn bằng tiếng Việt thôi ạ. Anh/Chị vui lòng hỏi bằng tiếng Việt để em hỗ trợ tốt hơn ạ!"
+
+HÃY TRẢ LỜI BẰNG TIẾNG VIỆT NGAY BÂY GIỜ:"""
     rag_prompt = PromptTemplate.from_template(rag_template)
 
     def format_docs(docs):

@@ -4,6 +4,9 @@ from langchain_core.documents import Document
 from langchain_core.prompts import PromptTemplate
 from langchain_core.runnables import RunnableLambda
 from langchain_core.output_parsers import StrOutputParser
+from langchain_community.utilities import SQLDatabase
+from langchain_community.agent_toolkits import SQLDatabaseToolkit
+from langchain_community.agent_toolkits import create_sql_agent
 from sqlalchemy import create_engine, text
 import re
 import config
@@ -78,7 +81,11 @@ def create_database_connection():
             conn.execute(text("SELECT 1"))
 
         print("Kết nối database thành công!")
-        return None, engine
+
+        # Tạo SQLDatabase object cho LangChain
+        db = SQLDatabase(engine=engine)
+
+        return db, engine
 
     except Exception as e:
         print(f"Lỗi kết nối database: {e}")
@@ -238,6 +245,81 @@ def get_order_info_from_db(engine, search_term):
     except Exception as e:
         print(f"Lỗi tìm kiếm đơn hàng: {e}")
         return []
+
+
+def create_text_to_sql_agent(llm):
+    """Tạo SQL Agent với Function Calling để tự động generate SQL từ câu hỏi"""
+    print("Khởi tạo Text-to-SQL Agent với Function Calling...")
+
+    sql_database, engine = create_database_connection()
+
+    if not sql_database:
+        print("Không thể tạo SQL Agent - database không khả dụng")
+        return None
+
+    # Tạo SQL toolkit
+    toolkit = SQLDatabaseToolkit(db=sql_database, llm=llm)
+
+    # System prefix cho agent
+    prefix = """Bạn là NaHi - trợ lý AI chuyên tư vấn sản phẩm thời trang và tra cứu đơn hàng.
+
+CẤU TRÚC DATABASE:
+- Bảng products: id, name (tên sản phẩm), description (mô tả), price (giá gốc), sale_price (giá khuyến mãi), stock (tồn kho), category_id
+- Bảng categories: id, name (tên danh mục)
+- Bảng product_variants: id, product_id, sku (mã sản phẩm), size (kích thước), color (màu sắc), stock (tồn kho biến thể), price_adjustment (chênh lệch giá)
+- Bảng orders: id, order_number (mã đơn hàng), status (trạng thái), full_name (tên khách), phone (số điện thoại), email, created_at (ngày tạo)
+- Bảng order_items: id, order_id, product_name (tên sản phẩm), quantity (số lượng), price (giá), subtotal (tổng tiền)
+
+QUY TẮC BẮT BUỘC:
+1. CHỈ sử dụng SELECT - KHÔNG BAO GIỜ dùng UPDATE, DELETE, DROP, INSERT, ALTER
+2. Luôn dùng LOWER() và LIKE '%...%' khi tìm kiếm text tiếng Việt
+3. JOIN bảng khi cần thông tin từ nhiều bảng (VD: products JOIN categories, products JOIN product_variants)
+4. LIMIT kết quả để tránh quá tải (products LIMIT 10, orders LIMIT 5)
+5. Trả lời bằng TIẾNG VIỆT, xưng "em", gọi khách "anh/chị"
+6. Nếu không tìm thấy dữ liệu, trả lời lịch sự: "Dạ, em không tìm thấy... Anh/Chị có thể cung cấp thêm thông tin không ạ?"
+
+VÍ DỤ QUERY:
+- "Tìm áo thun": SELECT p.*, c.name as category FROM products p LEFT JOIN categories c ON p.category_id = c.id WHERE LOWER(p.name) LIKE '%áo thun%' LIMIT 10
+- "Đơn hàng ORD123": SELECT * FROM orders WHERE order_number = 'ORD123'
+- "Sản phẩm giá dưới 200k": SELECT * FROM products WHERE price < 200000 LIMIT 10
+
+Hãy phân tích câu hỏi, tạo SQL phù hợp, và trả lời bằng tiếng Việt thân thiện."""
+
+    suffix = """
+
+CÁCH TRẢ LỜI:
+1. Phân tích câu hỏi của khách hàng
+2. Tạo và thực thi SQL query
+3. Format kết quả thành câu trả lời tự nhiên bằng tiếng Việt
+4. Xưng "em", gọi khách "anh/chị"
+5. Kết thúc: "Anh/Chị có cần em tư vấn thêm gì không ạ?"
+
+KHÔNG BAO GIỜ:
+- Trả lời bằng tiếng Anh hoặc ngôn ngữ khác
+- Show SQL query cho khách hàng
+- Thực hiện UPDATE/DELETE/DROP
+
+Begin!
+
+Question: {input}
+Thought: Tôi cần phân tích câu hỏi và tạo SQL query phù hợp.
+{agent_scratchpad}"""
+
+    # Tạo agent
+    agent = create_sql_agent(
+        llm=llm,
+        db=sql_database,
+        verbose=True,
+        agent_type="tool-calling",
+        prefix=prefix,
+        suffix=suffix,
+        max_iterations=5,
+        max_execution_time=30,
+        handle_parsing_errors=True,
+    )
+
+    print("Text-to-SQL Agent đã sẵn sàng!")
+    return agent
 
 
 def create_rag_chain(llm):

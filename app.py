@@ -13,7 +13,9 @@ print("Bắt đầu quá trình khởi tạo mô hình AI...")
 try:
     llm = services.load_llm_pipeline()
 
+    # Tạo cả RAG chain và SQL Agent
     rag_chain = services.create_rag_chain(llm)
+    sql_agent = services.create_text_to_sql_agent(llm)
 
     print("Server đã sẵn sàng!")
 
@@ -24,7 +26,7 @@ except Exception as e:
 
 @app.route("/ask", methods=["POST"])
 def handle_ask():
-    global rag_chain
+    global rag_chain, sql_agent
 
     try:
         data = request.json
@@ -33,7 +35,12 @@ def handle_ask():
             return jsonify({"error": "Không tìm thấy 'question' trong JSON body."}), 400
 
         question = data["question"]
+        use_sql_agent = data.get("use_sql_agent", True)  # Mặc định dùng SQL Agent
+
         print(f"\n[API] Đã nhận câu hỏi: {question}")
+        print(
+            f"[API] Mode: {'SQL Agent (Text-to-SQL)' if use_sql_agent else 'RAG Chain (Regex)'}"
+        )
 
         # Kiểm tra ngôn ngữ
         if not services.is_vietnamese(question):
@@ -44,14 +51,30 @@ def handle_ask():
                 }
             )
 
-        response = rag_chain.invoke(question)
+        # Chọn mode xử lý
+        if use_sql_agent and sql_agent:
+            # Dùng SQL Agent (Text-to-SQL với Function Calling)
+            print("[API] Sử dụng SQL Agent...")
+            response = sql_agent.invoke({"input": question})
+            answer = (
+                response.get("output", response)
+                if isinstance(response, dict)
+                else str(response)
+            )
+        else:
+            # Dùng RAG Chain (regex-based cũ)
+            print("[API] Sử dụng RAG Chain...")
+            answer = rag_chain.invoke(question)
 
-        print(f"[API] Đang trả lời: {response}")
+        print(f"[API] Đang trả lời: {answer}")
 
-        return jsonify({"answer": response})
+        return jsonify({"answer": answer})
 
     except Exception as e:
         print(f"[API LỖI] {str(e)}")
+        import traceback
+
+        traceback.print_exc()
         return jsonify({"error": f"Đã xảy ra lỗi server: {str(e)}"}), 500
 
 
@@ -68,7 +91,7 @@ def handle_disconnect():
 
 @socketio.on("send_message")
 def handle_send_message(data):
-    global rag_chain
+    global rag_chain, sql_agent
 
     try:
         message = data.get("message", "")
@@ -102,7 +125,20 @@ def handle_send_message(data):
         )
 
         services.save_chat_message(session_id, "user", message, user_id)
-        answer = rag_chain.invoke(message)
+
+        # Dùng SQL Agent mặc định
+        if sql_agent:
+            print("[Socket.IO] Sử dụng SQL Agent...")
+            response = sql_agent.invoke({"input": message})
+            answer = (
+                response.get("output", response)
+                if isinstance(response, dict)
+                else str(response)
+            )
+        else:
+            print("[Socket.IO] SQL Agent không khả dụng, dùng RAG Chain...")
+            answer = rag_chain.invoke(message)
+
         services.save_chat_message(session_id, "bot", answer, user_id)
         print(f"[Socket.IO] Session {session_id} - Trả lời: {answer}")
 
@@ -124,7 +160,7 @@ def handle_send_message(data):
 
 @socketio.on("ask_question")
 def handle_socket_question(data):
-    global rag_chain
+    global rag_chain, sql_agent
 
     try:
         question = data.get("question", "")
@@ -148,7 +184,18 @@ def handle_socket_question(data):
 
         emit("processing", {"message": "Đang xử lý câu hỏi..."})
 
-        response = rag_chain.invoke(question)
+        # Dùng SQL Agent mặc định
+        if sql_agent:
+            print("[Socket.IO] Sử dụng SQL Agent...")
+            response_data = sql_agent.invoke({"input": question})
+            response = (
+                response_data.get("output", response_data)
+                if isinstance(response_data, dict)
+                else str(response_data)
+            )
+        else:
+            print("[Socket.IO] SQL Agent không khả dụng, dùng RAG Chain...")
+            response = rag_chain.invoke(question)
 
         print(f"[Socket.IO] Đang trả lời: {response}")
 

@@ -287,29 +287,39 @@ Hãy phân tích câu hỏi, tạo SQL phù hợp, và trả lời bằng tiến
 
     suffix = """
 
-CÁCH TRẢ LỜI:
-1. Phân tích câu hỏi của khách hàng
-2. Tạo và thực thi SQL query
-3. Format kết quả thành câu trả lời tự nhiên bằng tiếng Việt
-4. Xưng "em", gọi khách "anh/chị"
-5. Kết thúc: "Anh/Chị có cần em tư vấn thêm gì không ạ?"
+CÁCH TRẢ LỜI - QUAN TRỌNG:
+1. Phân tích câu hỏi của khách hàng (KHÔNG nói ra suy nghĩ này)
+2. Tạo và thực thi SQL query (KHÔNG show SQL cho khách)
+3. Format kết quả thành câu trả lời TỰ NHIÊN bằng tiếng Việt
+4. CHỈ TRẢ VỀ câu trả lời cuối cùng cho khách hàng
+5. Xưng "em", gọi khách "anh/chị"
+6. Kết thúc: "Anh/Chị có cần em tư vấn thêm gì không ạ?"
 
-KHÔNG BAO GIỜ:
+TUYỆT ĐỐI KHÔNG:
 - Trả lời bằng tiếng Anh hoặc ngôn ngữ khác
-- Show SQL query cho khách hàng
+- Show SQL query, tên bảng, tên cột cho khách hàng
+- Show quá trình suy nghĩ (Thought, Action, Observation)
+- Nói "Tôi cần truy vấn bảng..." hay bất kỳ thông tin kỹ thuật nào
 - Thực hiện UPDATE/DELETE/DROP
+
+VÍ DỤ TRẢ LỜI ĐÚNG:
+User: "Có áo màu đỏ không?"
+Bot: "Dạ có ạ! Shop em có Áo thun nam Basic màu đỏ giá 199,000đ và Áo polo nữ màu đỏ giá 299,000đ. Anh/Chị muốn xem chi tiết sản phẩm nào ạ?"
+
+VÍ DỤ TRẢ LỜI SAI (TUYỆT ĐỐI TRÁNH):
+"Tôi cần truy vấn bảng product_variants..." ❌
+"Để làm điều này, tôi cần kết hợp với bảng products..." ❌
 
 Begin!
 
 Question: {input}
-Thought: Tôi cần phân tích câu hỏi và tạo SQL query phù hợp.
 {agent_scratchpad}"""
 
     # Tạo agent
     agent = create_sql_agent(
         llm=llm,
         db=sql_database,
-        verbose=True,
+        verbose=False,  # Tắt verbose để không leak thông tin kỹ thuật
         agent_type="tool-calling",
         prefix=prefix,
         suffix=suffix,

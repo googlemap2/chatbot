@@ -13,6 +13,127 @@ import config
 from langdetect import detect, LangDetectException
 
 
+def filter_sensitive_content(text):
+    """
+    Lọc nội dung nhạy cảm trong input của người dùng.
+    Thuật toán:
+    1. Chuyển input về chữ thường
+    2. Tách câu thành các từ riêng biệt bằng khoảng trắng
+    3. Duyệt qua từng từ và so sánh với danh sách từ ngữ nhạy cảm
+    4. Nếu phát hiện từ nhạy cảm: trả về (True, từ bị phát hiện)
+    5. Nếu không có từ nhạy cảm: trả về (False, None)
+    """
+
+    # Danh sách từ ngữ nhạy cảm
+    sensitive_words = {
+        # Từ ngữ bạo lực (Tiếng Việt)
+        "giết",
+        "chết",
+        "máu",
+        "đánh",
+        "bắn",
+        "cướp",
+        "sát hại",
+        "giết chóc",
+        "sát nhân",
+        "ám sát",
+        "thảm sát",
+        "đâm chém",
+        "tra tấn",
+        "hành hạ",
+        "tự tử",
+        "tự sát",
+        # Từ ngữ tình dục (Tiếng Việt)
+        "tình dục",
+        "quan hệ",
+        "làm tình",
+        "khỏa thân",
+        "phim sex",
+        "khiêu dâm",
+        "mại dâm",
+        "gái điếm",
+        "gái gọi",
+        # Từ ngữ chửi thề (Tiếng Việt)
+        "đồ chó",
+        "con chó",
+        "đồ lợn",
+        "đồ khốn",
+        "đồ ngu",
+        "chết tiệt",
+        "đú má",
+        "vãi",
+        "đụ",
+        "lồn",
+        "cặc",
+        "buồi",
+        "địt",
+        "đéo",
+        "óc chó",
+        "mẹ mày",
+        "bố mày",
+        "con mẹ",
+        "con điên",
+        "đồ điên",
+        "ngu si",
+        "đần độn",
+        # Từ ngữ chính trị nhạy cảm
+        "chống phá",
+        "phản động",
+        "xuyên tạc",
+        "bôi nhọ",
+        "làm loạn",
+        "gây rối",
+        # Từ viết tắt và slang
+        "wtf",
+        "omfg",
+        "stfu",
+        "dmm",
+        "vcl",
+        "vkl",
+        "cc",
+        "dkm",
+        "cdm",
+        "clgt",
+        "dcm",
+        "dm",
+        "vl",
+    }
+
+    # Bước 1: Chuyển về chữ thường
+    text_lower = text.lower().strip()
+
+    # Bước 2: Tách câu thành các từ riêng biệt
+    words = text_lower.split()
+
+    # Bước 3 & 4: Duyệt qua từng từ và kiểm tra
+    for word in words:
+        # Loại bỏ dấu câu ở đầu/cuối từ
+        word_clean = word.strip(".,!?;:()[]{}\"'-")
+
+        # Kiểm tra từ đơn
+        if word_clean in sensitive_words:
+            return True, word_clean
+
+    # Kiểm tra cụm từ (2-3 từ liền nhau)
+    for i in range(len(words)):
+        # Kiểm tra cụm 2 từ
+        if i < len(words) - 1:
+            phrase_2 = f"{words[i]} {words[i+1]}"
+            phrase_2_clean = phrase_2.strip(".,!?;:()[]{}\"'-")
+            if phrase_2_clean in sensitive_words:
+                return True, phrase_2_clean
+
+        # Kiểm tra cụm 3 từ
+        if i < len(words) - 2:
+            phrase_3 = f"{words[i]} {words[i+1]} {words[i+2]}"
+            phrase_3_clean = phrase_3.strip(".,!?;:()[]{}\"'-")
+            if phrase_3_clean in sensitive_words:
+                return True, phrase_3_clean
+
+    # Bước 5: Không phát hiện từ nhạy cảm
+    return False, None
+
+
 def is_vietnamese(text):
     """Kiểm tra xem text có phải tiếng Việt không"""
     try:

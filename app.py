@@ -96,7 +96,17 @@ def handle_ask():
             f"[API] Mode: {'SQL Agent (Text-to-SQL)' if use_sql_agent else 'RAG Chain (Regex)'}"
         )
 
-        # Kiểm tra ngôn ngữ
+        # Kiểm tra nội dung nhạy cảm TRƯỚC
+        is_sensitive, detected_word = services.filter_sensitive_content(question)
+        if is_sensitive:
+            print(f"[API] Từ chối - Phát hiện từ nhạy cảm: {detected_word}")
+            return jsonify(
+                {
+                    "answer": "Xin lỗi, trong câu của bạn có chứa từ ngữ không phù hợp. Vui lòng sử dụng ngôn từ lịch sự để tôi có thể hỗ trợ bạn tốt hơn ạ."
+                }
+            )
+
+        # Kiểm tra ngôn ngữ SAU
         if not services.is_vietnamese(question):
             print(f"[API] Từ chối - Không phải tiếng Việt: {question}")
             return jsonify(
@@ -167,7 +177,22 @@ def handle_send_message(data):
 
         print(f"\n[Socket.IO] Session {session_id} - Nhận message: {message}")
 
-        # Kiểm tra ngôn ngữ
+        # Kiểm tra nội dung nhạy cảm TRƯỚC
+        is_sensitive, detected_word = services.filter_sensitive_content(message)
+        services.save_chat_message(session_id, "user", message, user_id)
+        if is_sensitive:
+            print(f"[Socket.IO] Từ chối - Phát hiện từ nhạy cảm: {detected_word}")
+            emit(
+                "message_response",
+                {
+                    "message": message,
+                    "answer": "Xin lỗi, trong câu của bạn có chứa từ ngữ không phù hợp. Vui lòng sử dụng ngôn từ lịch sự để tôi có thể hỗ trợ bạn tốt hơn ạ.",
+                    "session_id": session_id,
+                },
+            )
+            return
+
+        # Kiểm tra ngôn ngữ SAU
         if not services.is_vietnamese(message):
             print(f"[Socket.IO] Từ chối - Không phải tiếng Việt: {message}")
             emit(
@@ -184,8 +209,6 @@ def handle_send_message(data):
             "processing",
             {"message": "Đang xử lý câu hỏi của bạn...", "session_id": session_id},
         )
-
-        services.save_chat_message(session_id, "user", message, user_id)
 
         # Kiểm tra special messages (chào hỏi, cảm ơn) trước
         special_answer = handle_special_messages(message)

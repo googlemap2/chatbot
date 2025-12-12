@@ -252,7 +252,7 @@ def create_text_to_sql_agent(llm):
     print("Khởi tạo Text-to-SQL Agent với Function Calling...")
 
     sql_database, engine = create_database_connection()
-
+    print("DEBUG: SQLDatabase object:", sql_database)
     if not sql_database:
         print("Không thể tạo SQL Agent - database không khả dụng")
         return None
@@ -264,7 +264,7 @@ def create_text_to_sql_agent(llm):
     prefix = """Bạn là NaHi - trợ lý AI chuyên tư vấn sản phẩm thời trang và tra cứu đơn hàng.
 
 CẤU TRÚC DATABASE:
-- Bảng products: id, name (tên sản phẩm), description (mô tả), price (giá gốc), sale_price (giá khuyến mãi), stock (tồn kho), category_id
+- Bảng products: id, name (tên sản phẩm), description (mô tả), price (giá gốc), sale_price (giá khuyến mãi), category_id
 - Bảng categories: id, name (tên danh mục)
 - Bảng product_variants: id, product_id, sku (mã sản phẩm), size (kích thước), color (màu sắc), stock (tồn kho biến thể), price_adjustment (chênh lệch giá)
 - Bảng orders: id, order_number (mã đơn hàng), status (trạng thái), full_name (tên khách), phone (số điện thoại), email, created_at (ngày tạo)

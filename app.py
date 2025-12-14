@@ -6,20 +6,23 @@ import threading
 import re
 
 
-def handle_special_messages(message):
-    """Xử lý các câu chào hỏi, cảm ơn đơn giản trước khi gửi xuống AI"""
+def handle_greeting(message):
+    """Xử lý các câu chào hỏi"""
     message_lower = message.lower().strip()
-
-    # Câu chào
     greetings = ["xin chào", "hello", "hi", "chào", "hey", "chào shop", "alo"]
+
     if any(greeting in message_lower for greeting in greetings) and len(message) < 30:
         return "Dạ, chào anh/chị! Em là NaHi - nhân viên tư vấn của shop. Shop em bán quần áo thời trang, anh/Chị cần em tư vấn gì ạ?"
 
-    # Câu cảm ơn
-    thanks = ["cảm ơn", "thank", "thanks", "cám ơn", "cam on"]
-    if any(thank in message_lower for thank in thanks):
-        return "Dạ, em cảm ơn anh/chị đã ghé thăm cửa hàng! Nếu cần tư vấn thêm, anh/chị cứ hỏi NaHi bất cứ lúc nào nhé!"
+    return None
 
+
+def handle_special_messages(message):
+    """Xử lý các câu chào hỏi, cảm ơn đơn giản trước khi gửi xuống AI"""
+    # Kiểm tra chào hỏi
+    greeting_response = handle_greeting(message)
+    if greeting_response:
+        return greeting_response
     return None  # Không phải special message
 
 
@@ -106,6 +109,11 @@ def handle_ask():
                 }
             )
 
+        # Kiểm tra special messages trước
+        special_answer = handle_special_messages(question)
+        if special_answer:
+            return jsonify({"answer": special_answer})
+
         # Kiểm tra ngôn ngữ SAU
         if not services.is_vietnamese(question):
             print(f"[API] Từ chối - Không phải tiếng Việt: {question}")
@@ -114,11 +122,6 @@ def handle_ask():
                     "answer": "Xin lỗi, em chỉ hỗ trợ trả lời bằng tiếng Việt ạ. Anh/chị vui lòng nhắn tin bằng tiếng Việt nhé!"
                 }
             )
-
-        # Kiểm tra special messages trước
-        special_answer = handle_special_messages(question)
-        if special_answer:
-            return jsonify({"answer": special_answer})
 
         # Chọn mode xử lý
         if use_sql_agent and sql_agent:
@@ -182,27 +185,46 @@ def handle_send_message(data):
         services.save_chat_message(session_id, "user", message, user_id)
         if is_sensitive:
             print(f"[Socket.IO] Từ chối - Phát hiện từ nhạy cảm: {detected_word}")
+            answer = "Xin lỗi, trong câu của bạn có chứa từ ngữ không phù hợp. Vui lòng sử dụng ngôn từ lịch sự để tôi có thể hỗ trợ bạn tốt hơn ạ."
             emit(
                 "message_response",
                 {
                     "message": message,
-                    "answer": "Xin lỗi, trong câu của bạn có chứa từ ngữ không phù hợp. Vui lòng sử dụng ngôn từ lịch sự để tôi có thể hỗ trợ bạn tốt hơn ạ.",
+                    "answer": answer,
                     "session_id": session_id,
                 },
             )
+            services.save_chat_message(session_id, "bot", answer, user_id)
+            return
+
+        # Kiểm tra special messages (chào hỏi, cảm ơn) trước
+        special_answer = handle_special_messages(message)
+        if special_answer:
+            answer = special_answer
+            emit(
+                "message_response",
+                {
+                    "message": message,
+                    "answer": answer,
+                    "session_id": session_id,
+                },
+            )
+            services.save_chat_message(session_id, "bot", answer, user_id)
             return
 
         # Kiểm tra ngôn ngữ SAU
         if not services.is_vietnamese(message):
             print(f"[Socket.IO] Từ chối - Không phải tiếng Việt: {message}")
+            answer = "Xin lỗi, em chỉ hỗ trợ trả lời bằng tiếng Việt ạ. Anh/chị vui lòng nhắn tin bằng tiếng Việt nhé!"
             emit(
                 "message_response",
                 {
                     "message": message,
-                    "answer": "Xin lỗi, em chỉ hỗ trợ trả lời bằng tiếng Việt ạ. Anh/chị vui lòng nhắn tin bằng tiếng Việt nhé!",
+                    "answer": answer,
                     "session_id": session_id,
                 },
             )
+            services.save_chat_message(session_id, "bot", answer, user_id)
             return
 
         emit(
@@ -210,13 +232,8 @@ def handle_send_message(data):
             {"message": "Đang xử lý câu hỏi của bạn...", "session_id": session_id},
         )
 
-        # Kiểm tra special messages (chào hỏi, cảm ơn) trước
-        special_answer = handle_special_messages(message)
-        if special_answer:
-            answer = special_answer
-            print(f"[Socket.IO] Phản hồi special message: {answer[:50]}...")
         # Dùng SQL Agent cho các câu hỏi thực sự
-        elif sql_agent:
+        if sql_agent:
             print("[Socket.IO] Sử dụng SQL Agent...")
             response = sql_agent.invoke({"input": message})
             raw_answer = (

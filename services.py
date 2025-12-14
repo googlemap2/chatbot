@@ -85,8 +85,6 @@ def filter_sensitive_content(text):
         "gây rối",
         # Từ viết tắt và slang
         "wtf",
-        "omfg",
-        "stfu",
         "dmm",
         "vcl",
         "vkl",

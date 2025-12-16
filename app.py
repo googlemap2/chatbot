@@ -2,17 +2,27 @@ from flask import Flask, request, jsonify, render_template_string
 from flask_socketio import SocketIO, emit
 import services
 import sys
-import threading
+import time
 import re
 
 
 def handle_greeting(message):
     """Xử lý các câu chào hỏi"""
     message_lower = message.lower().strip()
-    greetings = ["xin chào", "hello", "hi", "chào", "hey", "chào shop", "alo"]
 
-    if any(greeting in message_lower for greeting in greetings) and len(message) < 30:
-        return "Dạ, chào anh/chị! Em là NaHi - nhân viên tư vấn của shop. Shop em bán quần áo thời trang, anh/Chị cần em tư vấn gì ạ?"
+    # Kiểm tra từng từ riêng biệt để tránh match nhầm
+    words = message_lower.split()
+    # greetings = ["xin chào", "hello", "hi", "chào", "hey", "chào shop", "alo"]
+
+    # Kiểm tra câu ngắn (< 30 ký tự) và có chứa từ chào ở đầu hoặc đứng riêng
+    if len(message) < 30:
+        # Kiểm tra cụm từ 2 từ trước
+        if any(greeting in message_lower for greeting in ["xin chào", "chào shop"]):
+            return "Dạ, chào anh/chị! Em là NaHi - nhân viên tư vấn của shop. Shop em bán quần áo thời trang, anh/Chị cần em tư vấn gì ạ?"
+
+        # Kiểm tra từ đơn ở đầu câu hoặc đứng riêng
+        if words and words[0] in ["hello", "hi", "chào", "hey", "alo"]:
+            return "Dạ, chào anh/chị! Em là NaHi - nhân viên tư vấn của shop. Shop em bán quần áo thời trang, anh/Chị cần em tư vấn gì ạ?"
 
     return None
 
@@ -128,6 +138,17 @@ def handle_ask():
             # Dùng SQL Agent (Text-to-SQL với Function Calling)
             print("[API] Sử dụng SQL Agent...")
             response = sql_agent.invoke({"input": question})
+
+            # Debug: In ra toàn bộ response
+            print(f"[DEBUG] Full Agent Response: {response}")
+            if isinstance(response, dict):
+                if "intermediate_steps" in response:
+                    print(
+                        f"[DEBUG] Intermediate Steps: {response['intermediate_steps']}"
+                    )
+                    for i, step in enumerate(response["intermediate_steps"]):
+                        print(f"[DEBUG] Step {i+1}: {step}")
+
             raw_answer = (
                 response.get("output", response)
                 if isinstance(response, dict)
@@ -235,7 +256,80 @@ def handle_send_message(data):
         # Dùng SQL Agent cho các câu hỏi thực sự
         if sql_agent:
             print("[Socket.IO] Sử dụng SQL Agent...")
-            response = sql_agent.invoke({"input": message})
+            try:
+                print(f"[DEBUG] Invoking agent with input: {message}")
+
+                # Thời gian bắt đầu gọi agent
+                time_agent_start = time.time()
+                response = sql_agent.invoke({"input": message})
+                time_agent_end = time.time()
+                time_agent_total = time_agent_end - time_agent_start
+
+                print(f"[TIMING] Agent invoke: {time_agent_total:.3f}s")
+                print(f"[DEBUG] Agent invoke completed successfully")
+            except Exception as e:
+                error_msg = str(e)
+                print(f"[ERROR] Agent invoke failed: {error_msg}")
+
+                # Xử lý lỗi cụ thể
+                if "503" in error_msg or "overloaded" in error_msg.lower():
+                    print(f"[ERROR] ⚠️ Gemini API quá tải (503)")
+                    answer = "Dạ, hệ thống AI đang quá tải. Anh/Chị vui lòng thử lại sau ít phút nhé!"
+                elif "timeout" in error_msg.lower():
+                    print(f"[ERROR] ⏱️ Request timeout")
+                    answer = "Dạ, câu hỏi hơi phức tạp và mất thời gian xử lý. Anh/Chị có thể hỏi đơn giản hơn không ạ?"
+                elif "max iterations" in error_msg.lower():
+                    print(f"[ERROR] 🔄 Agent vượt quá số lần lặp")
+                    answer = "Dạ, em chưa tìm được câu trả lời phù hợp. Anh/Chị có thể hỏi cụ thể hơn không ạ?"
+                else:
+                    answer = "Dạ, em gặp lỗi khi xử lý câu hỏi. Anh/Chị thử hỏi lại được không ạ?"
+
+                import traceback
+
+                traceback.print_exc()
+
+                services.save_chat_message(session_id, "bot", answer, user_id)
+                emit(
+                    "message_response",
+                    {"message": message, "answer": answer, "session_id": session_id},
+                )
+                return
+
+            # Debug: In ra toàn bộ response
+            print(f"[DEBUG] Full Agent Response: {response}")
+            print(f"[DEBUG] Response type: {type(response)}")
+            print(
+                f"[DEBUG] Response keys: {response.keys() if isinstance(response, dict) else 'N/A'}"
+            )
+
+            # Phân tích thời gian từng bước
+            time_sql_generation = 0
+            time_sql_execution = 0
+            time_formatting = 0
+            has_steps = False
+
+            if (
+                isinstance(response, dict)
+                and "intermediate_steps" in response
+                and len(response["intermediate_steps"]) > 0
+            ):
+                has_steps = True
+                print(f"[DEBUG] Số bước xử lý: {len(response['intermediate_steps'])}")
+                for i, step in enumerate(response["intermediate_steps"]):
+                    action, observation = step
+                    tool_name = action.tool if hasattr(action, "tool") else "unknown"
+
+                    print(f"[DEBUG] ===== Step {i+1} =====")
+                    print(f"[DEBUG] Action: {tool_name}")
+                    print(
+                        f"[DEBUG] Tool Input: {action.tool_input if hasattr(action, 'tool_input') else ''}"
+                    )
+                    print(
+                        f"[DEBUG] Observation: {observation[:200]}..."
+                        if len(str(observation)) > 200
+                        else f"[DEBUG] Observation: {observation}"
+                    )
+
             raw_answer = (
                 response.get("output", response)
                 if isinstance(response, dict)

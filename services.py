@@ -174,14 +174,19 @@ def load_llm_pipeline():
     llm = ChatGoogleGenerativeAI(
         model=config.LLM_MODEL_NAME,
         google_api_key=config.GOOGLE_API_KEY,
-        temperature=0.8,
+        temperature=0.3,  # Giảm xuống 0.3 để nhất quán hơn với SQL Agent
         max_output_tokens=8192,
         convert_system_message_to_human=True,
         top_p=0.95,
         top_k=40,
+        max_retries=3,  # Retry 3 lần khi gặp lỗi
+        request_timeout=60,  # Timeout 60s cho mỗi request
     )
 
     print("Kết nối Gemini API thành công!")
+    print(f"  - Model: {config.LLM_MODEL_NAME}")
+    print(f"  - Temperature: 0.3")
+    print(f"  - Max retries: 3")
     return llm
 
 
@@ -392,27 +397,65 @@ CẤU TRÚC DATABASE:
 QUY TẮC BẮT BUỘC:
 1. CHỈ sử dụng SELECT - KHÔNG BAO GIỜ dùng UPDATE, DELETE, DROP, INSERT, ALTER
 2. Luôn dùng LOWER() và LIKE '%...%' khi tìm kiếm text tiếng Việt
-3. JOIN bảng khi cần thông tin từ nhiều bảng (VD: products JOIN categories, products JOIN product_variants)
-4. LIMIT kết quả để tránh quá tải (products LIMIT 10, orders LIMIT 5)
-5. Trả lời bằng TIẾNG VIỆT, xưng "em", gọi khách "anh/chị"
-6. Nếu không tìm thấy dữ liệu, trả lời lịch sự: "Dạ, em không tìm thấy... Anh/Chị có thể cung cấp thêm thông tin không ạ?"
+3. KHI TÌM KIẾM THEO MÀU SẮC, SIZE, SKU: BẮT BUỘC JOIN với product_variants
+   - Tìm theo màu → JOIN product_variants và WHERE LOWER(pv.color) LIKE '%màu%'
+   - Tìm theo size → JOIN product_variants và WHERE LOWER(pv.size) LIKE '%size%'
+4. JOIN categories khi cần thông tin danh mục
+5. LIMIT kết quả để tránh quá tải (products LIMIT 10, orders LIMIT 5)
+6. Trả lời bằng TIẾNG VIỆT, xưng "em", gọi khách "anh/chị"
+7. Nếu không tìm thấy dữ liệu, trả lời lịch sự: "Dạ, em không tìm thấy... Anh/Chị có thể cung cấp thêm thông tin không ạ?"
 
 VÍ DỤ QUERY:
-- "Tìm áo thun": SELECT p.*, c.name as category FROM products p LEFT JOIN categories c ON p.category_id = c.id WHERE LOWER(p.name) LIKE '%áo thun%' LIMIT 10
-- "Đơn hàng ORD123": SELECT * FROM orders WHERE order_number = 'ORD123'
-- "Sản phẩm giá dưới 200k": SELECT * FROM products WHERE price < 200000 LIMIT 10
+- "Tìm áo thun": 
+  SELECT p.*, c.name as category 
+  FROM products p 
+  LEFT JOIN categories c ON p.category_id = c.id 
+  WHERE LOWER(p.name) LIKE '%áo thun%' 
+  LIMIT 10
+
+- "Quần jean màu đen" hoặc "quần jeans đen": 
+  SELECT p.name, p.price, p.sale_price, pv.color, pv.size, pv.sku, pv.stock
+  FROM products p
+  JOIN product_variants pv ON p.id = pv.product_id
+  WHERE LOWER(p.name) LIKE '%quần jean%'
+    AND LOWER(pv.color) LIKE '%đen%'
+  LIMIT 10
+
+- "Áo size M màu đỏ":
+  SELECT p.name, p.price, pv.color, pv.size, pv.stock
+  FROM products p
+  JOIN product_variants pv ON p.id = pv.product_id
+  WHERE LOWER(p.name) LIKE '%áo%'
+    AND LOWER(pv.size) LIKE '%m%'
+    AND LOWER(pv.color) LIKE '%đỏ%'
+  LIMIT 10
+
+- "Đơn hàng ORD123": 
+  SELECT * FROM orders WHERE order_number = 'ORD123'
+
+- "Sản phẩm giá dưới 200k": 
+  SELECT * FROM products WHERE price < 200000 LIMIT 10
 
 Hãy phân tích câu hỏi, tạo SQL phù hợp, và trả lời bằng tiếng Việt thân thiện."""
 
     suffix = """
 
 CÁCH TRẢ LỜI - QUAN TRỌNG:
-1. Phân tích câu hỏi của khách hàng (KHÔNG nói ra suy nghĩ này)
-2. Tạo và thực thi SQL query (KHÔNG show SQL cho khách)
-3. Format kết quả thành câu trả lời TỰ NHIÊN bằng tiếng Việt
-4. CHỈ TRẢ VỀ câu trả lời cuối cùng cho khách hàng
-5. Xưng "em", gọi khách "anh/chị"
-6. Kết thúc: "Anh/Chị có cần em tư vấn thêm gì không ạ?"
+1. Phân tích câu hỏi → Xác định bảng cần query
+2. Kiểm tra schema nếu cần (CHỈ 1 LẦN)
+3. Tạo và thực thi SQL query (CHỈ 1 LẦN)
+4. Format kết quả thành câu trả lời bằng tiếng Việt
+5. TRẢ VỀ NGAY - KHÔNG lặp lại các bước
+
+QUY TẮC DỪNG:
+- Sau khi có kết quả từ sql_db_query → TRẢ LỜI NGAY
+- Nếu không tìm thấy dữ liệu → TRẢ LỜI NGAY: "Dạ, em không tìm thấy..."
+- KHÔNG query nhiều lần cho cùng một câu hỏi
+- KHÔNG kiểm tra schema nhiều lần
+
+FORMAT TRẢ LỜI:
+- Xưng "em", gọi khách "anh/chị"
+- Kết thúc: "Anh/Chị có cần em tư vấn thêm gì không ạ?"
 
 TUYỆT ĐỐI KHÔNG:
 - Trả lời bằng tiếng Anh hoặc ngôn ngữ khác
@@ -438,16 +481,18 @@ Question: {input}
     agent = create_sql_agent(
         llm=llm,
         db=sql_database,
-        verbose=False,  # Tắt verbose để không leak thông tin kỹ thuật
+        verbose=True,  # Bật verbose để debug và xem SQL query
         agent_type="tool-calling",
         prefix=prefix,
         suffix=suffix,
-        max_iterations=5,
-        max_execution_time=30,
+        max_iterations=10,  # Tăng lên 10 để agent có thêm cơ hội
+        max_execution_time=45,  # Tăng timeout lên 45s
         handle_parsing_errors=True,
+        return_intermediate_steps=True,  # Trả về các bước trung gian
     )
 
     print("Text-to-SQL Agent đã sẵn sàng!")
+
     return agent
 
 
@@ -661,7 +706,6 @@ def save_chat_message(session_id, sender_type, message, user_id=None):
                 },
             )
 
-        print(f"Đã lưu tin nhắn ({sender_type}): {message[:30]}...")
         return True
 
     except Exception as e:

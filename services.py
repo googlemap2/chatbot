@@ -367,8 +367,10 @@ CẤU TRÚC DATABASE:
 - Bảng products: id, name (tên sản phẩm), description (mô tả), price (giá gốc), sale_price (giá khuyến mãi), category_id
 - Bảng categories: id, name (tên danh mục)
 - Bảng product_variants: id, product_id, sku (mã sản phẩm), size (kích thước), color (màu sắc), stock (tồn kho biến thể), price_adjustment (chênh lệch giá)
-- Bảng orders: id, order_number (mã đơn hàng), status (trạng thái), full_name (tên khách), phone (số điện thoại), email, created_at (ngày tạo)
+- Bảng orders: id, order_number (mã đơn hàng), status (trạng thái), full_name (tên khách), phone (số điện thoại), email, ward (mã phường/xã), province (mã tỉnh/thành), created_at (ngày tạo)
 - Bảng order_items: id, order_id, product_name (tên sản phẩm), quantity (số lượng), price (giá), subtotal (tổng tiền)
+- Bảng provinces: code (mã tỉnh/thành - PK), name (tên tỉnh/thành), full_name (tên đầy đủ), code_name (tên không dấu)
+- Bảng wards: code (mã phường/xã - PK), name (tên phường/xã), full_name (tên đầy đủ), province_code (mã tỉnh/thành - FK), code_name (tên không dấu)
 
 QUY TẮC BẮT BUỘC:
 1. CHỈ sử dụng SELECT - KHÔNG BAO GIỜ dùng UPDATE, DELETE, DROP, INSERT, ALTER

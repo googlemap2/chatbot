@@ -14,17 +14,6 @@ from langdetect import detect, LangDetectException
 
 
 def filter_sensitive_content(text):
-    """
-    Lọc nội dung nhạy cảm trong input của người dùng.
-    Thuật toán:
-    1. Chuyển input về chữ thường
-    2. Tách câu thành các từ riêng biệt bằng khoảng trắng
-    3. Duyệt qua từng từ và so sánh với danh sách từ ngữ nhạy cảm
-    4. Nếu phát hiện từ nhạy cảm: trả về (True, từ bị phát hiện)
-    5. Nếu không có từ nhạy cảm: trả về (False, None)
-    """
-
-    # Danh sách từ ngữ nhạy cảm
     sensitive_words = {
         # Từ ngữ bạo lực (Tiếng Việt)
         "giết",
@@ -97,24 +86,17 @@ def filter_sensitive_content(text):
         "vl",
     }
 
-    # Bước 1: Chuyển về chữ thường
     text_lower = text.lower().strip()
 
-    # Bước 2: Tách câu thành các từ riêng biệt
     words = text_lower.split()
 
-    # Bước 3 & 4: Duyệt qua từng từ và kiểm tra
     for word in words:
-        # Loại bỏ dấu câu ở đầu/cuối từ
         word_clean = word.strip(".,!?;:()[]{}\"'-")
 
-        # Kiểm tra từ đơn
         if word_clean in sensitive_words:
             return True, word_clean
-
-    # Kiểm tra cụm từ (2-3 từ liền nhau)
+          
     for i in range(len(words)):
-        # Kiểm tra cụm 2 từ
         if i < len(words) - 1:
             phrase_2 = f"{words[i]} {words[i+1]}"
             phrase_2_clean = phrase_2.strip(".,!?;:()[]{}\"'-")
@@ -137,17 +119,14 @@ def is_vietnamese(text):
     try:
         text_clean = text.strip().lower()
 
-        # Cho phép các câu chào cơ bản
         greetings = ["hello", "hi", "hey", "chào", "xin chào", "alo", "chào shop"]
         if any(greeting in text_clean for greeting in greetings):
             return True
 
-        # Cho phép các câu cảm ơn
         thanks = ["thank", "thanks", "cảm ơn", "cám ơn", "cam on"]
         if any(thank in text_clean for thank in thanks):
             return True
 
-        # Text ngắn < 3 ký tự
         if len(text_clean) < 3:
             return True
 
@@ -174,13 +153,13 @@ def load_llm_pipeline():
     llm = ChatGoogleGenerativeAI(
         model=config.LLM_MODEL_NAME,
         google_api_key=config.GOOGLE_API_KEY,
-        temperature=0.3,  # Giảm xuống 0.3 để nhất quán hơn với SQL Agent
+        temperature=0.3,
         max_output_tokens=8192,
         convert_system_message_to_human=True,
         top_p=0.95,
         top_k=40,
-        max_retries=3,  # Retry 3 lần khi gặp lỗi
-        request_timeout=60,  # Timeout 60s cho mỗi request
+        max_retries=3, 
+        request_timeout=60,
     )
 
     print("Kết nối Gemini API thành công!")
@@ -372,7 +351,6 @@ def get_order_info_from_db(engine, search_term):
 
 
 def create_text_to_sql_agent(llm):
-    """Tạo SQL Agent với Function Calling để tự động generate SQL từ câu hỏi"""
     print("Khởi tạo Text-to-SQL Agent với Function Calling...")
 
     sql_database, engine = create_database_connection()
@@ -381,10 +359,8 @@ def create_text_to_sql_agent(llm):
         print("Không thể tạo SQL Agent - database không khả dụng")
         return None
 
-    # Tạo SQL toolkit
     toolkit = SQLDatabaseToolkit(db=sql_database, llm=llm)
 
-    # System prefix cho agent
     prefix = """Bạn là NaHi - trợ lý AI chuyên tư vấn sản phẩm thời trang và tra cứu đơn hàng.
 
 CẤU TRÚC DATABASE:
@@ -469,8 +445,8 @@ User: "Có áo màu đỏ không?"
 Bot: "Dạ có ạ! Shop em có Áo thun nam Basic màu đỏ giá 199,000đ và Áo polo nữ màu đỏ giá 299,000đ. Anh/Chị muốn xem chi tiết sản phẩm nào ạ?"
 
 VÍ DỤ TRẢ LỜI SAI (TUYỆT ĐỐI TRÁNH):
-"Tôi cần truy vấn bảng product_variants..." ❌
-"Để làm điều này, tôi cần kết hợp với bảng products..." ❌
+"Tôi cần truy vấn bảng product_variants..."
+"Để làm điều này, tôi cần kết hợp với bảng products..."
 
 Begin!
 
@@ -481,14 +457,14 @@ Question: {input}
     agent = create_sql_agent(
         llm=llm,
         db=sql_database,
-        verbose=True,  # Bật verbose để debug và xem SQL query
+        verbose=True,
         agent_type="tool-calling",
         prefix=prefix,
         suffix=suffix,
-        max_iterations=10,  # Tăng lên 10 để agent có thêm cơ hội
-        max_execution_time=45,  # Tăng timeout lên 45s
+        max_iterations=10,
+        max_execution_time=45,
         handle_parsing_errors=True,
-        return_intermediate_steps=True,  # Trả về các bước trung gian
+        return_intermediate_steps=True,
     )
 
     print("Text-to-SQL Agent đã sẵn sàng!")
@@ -679,7 +655,7 @@ HÃY TRẢ LỜI BẰNG TIẾNG VIỆT NGAY BÂY GIỜ:"""
         | RunnableLambda(debug_llm_call)
         | StrOutputParser()
     )
-    print("Pipeline RAG với database integration hoàn chỉnh đã sẵn sàng.")
+    print("Pipeline RAG với database integration sẵn sàng.")
     return rag_chain
 
 

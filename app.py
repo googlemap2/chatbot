@@ -7,20 +7,14 @@ import re
 
 
 def handle_greeting(message):
-    """Xử lý các câu chào hỏi"""
     message_lower = message.lower().strip()
 
-    # Kiểm tra từng từ riêng biệt để tránh match nhầm
     words = message_lower.split()
-    # greetings = ["xin chào", "hello", "hi", "chào", "hey", "chào shop", "alo"]
 
-    # Kiểm tra câu ngắn (< 30 ký tự) và có chứa từ chào ở đầu hoặc đứng riêng
     if len(message) < 30:
-        # Kiểm tra cụm từ 2 từ trước
         if any(greeting in message_lower for greeting in ["xin chào", "chào shop"]):
             return "Dạ, chào anh/chị! Em là NaHi - nhân viên tư vấn của shop. Shop em bán quần áo thời trang, anh/Chị cần em tư vấn gì ạ?"
 
-        # Kiểm tra từ đơn ở đầu câu hoặc đứng riêng
         if words and words[0] in ["hello", "hi", "chào", "hey", "alo"]:
             return "Dạ, chào anh/chị! Em là NaHi - nhân viên tư vấn của shop. Shop em bán quần áo thời trang, anh/Chị cần em tư vấn gì ạ?"
 
@@ -28,12 +22,10 @@ def handle_greeting(message):
 
 
 def handle_special_messages(message):
-    """Xử lý các câu chào hỏi, cảm ơn đơn giản trước khi gửi xuống AI"""
-    # Kiểm tra chào hỏi
     greeting_response = handle_greeting(message)
     if greeting_response:
         return greeting_response
-    return None  # Không phải special message
+    return None 
 
 
 app = Flask(__name__)
@@ -43,8 +35,6 @@ print("Khởi tạo Flask server với Socket.IO...")
 
 
 def clean_agent_output(text):
-    """Loại bỏ thông tin kỹ thuật leak từ SQL Agent"""
-    # Loại bỏ các pattern leak thông tin DB
     patterns_to_remove = [
         r"Tôi cần.*?bảng.*?\.",
         r"Để làm điều này.*?\.",
@@ -66,10 +56,8 @@ def clean_agent_output(text):
     for pattern in patterns_to_remove:
         cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE)
 
-    # Loại bỏ khoảng trắng thừa
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
 
-    # Nếu sau khi clean không còn gì, trả về message mặc định
     if not cleaned or len(cleaned) < 10:
         return "Dạ, em đã tìm kiếm nhưng chưa tìm thấy thông tin phù hợp ạ. Anh/Chị có thể hỏi cụ thể hơn được không ạ?"
 
@@ -80,7 +68,6 @@ print("Bắt đầu quá trình khởi tạo mô hình AI...")
 try:
     llm = services.load_llm_pipeline()
 
-    # Tạo cả RAG chain và SQL Agent
     rag_chain = services.create_rag_chain(llm)
     sql_agent = services.create_text_to_sql_agent(llm)
 
@@ -102,14 +89,12 @@ def handle_ask():
             return jsonify({"error": "Không tìm thấy 'question' trong JSON body."}), 400
 
         question = data["question"]
-        use_sql_agent = data.get("use_sql_agent", True)  # Mặc định dùng SQL Agent
 
         print(f"\n[API] Đã nhận câu hỏi: {question}")
         print(
             f"[API] Mode: {'SQL Agent (Text-to-SQL)' if use_sql_agent else 'RAG Chain (Regex)'}"
         )
 
-        # Kiểm tra nội dung nhạy cảm TRƯỚC
         is_sensitive, detected_word = services.filter_sensitive_content(question)
         if is_sensitive:
             print(f"[API] Từ chối - Phát hiện từ nhạy cảm: {detected_word}")
@@ -119,12 +104,10 @@ def handle_ask():
                 }
             )
 
-        # Kiểm tra special messages trước
         special_answer = handle_special_messages(question)
         if special_answer:
             return jsonify({"answer": special_answer})
 
-        # Kiểm tra ngôn ngữ SAU
         if not services.is_vietnamese(question):
             print(f"[API] Từ chối - Không phải tiếng Việt: {question}")
             return jsonify(
@@ -133,13 +116,10 @@ def handle_ask():
                 }
             )
 
-        # Chọn mode xử lý
         if use_sql_agent and sql_agent:
-            # Dùng SQL Agent (Text-to-SQL với Function Calling)
             print("[API] Sử dụng SQL Agent...")
             response = sql_agent.invoke({"input": question})
 
-            # Debug: In ra toàn bộ response
             print(f"[DEBUG] Full Agent Response: {response}")
             if isinstance(response, dict):
                 if "intermediate_steps" in response:
@@ -154,10 +134,8 @@ def handle_ask():
                 if isinstance(response, dict)
                 else str(response)
             )
-            # Làm sạch output trước khi trả về
             answer = clean_agent_output(raw_answer)
         else:
-            # Dùng RAG Chain (regex-based cũ)
             print("[API] Sử dụng RAG Chain...")
             answer = rag_chain.invoke(question)
 
@@ -201,7 +179,6 @@ def handle_send_message(data):
 
         print(f"\n[Socket.IO] Session {session_id} - Nhận message: {message}")
 
-        # Kiểm tra nội dung nhạy cảm TRƯỚC
         is_sensitive, detected_word = services.filter_sensitive_content(message)
         services.save_chat_message(session_id, "user", message, user_id)
         if is_sensitive:
@@ -218,7 +195,6 @@ def handle_send_message(data):
             services.save_chat_message(session_id, "bot", answer, user_id)
             return
 
-        # Kiểm tra special messages (chào hỏi, cảm ơn) trước
         special_answer = handle_special_messages(message)
         if special_answer:
             answer = special_answer
@@ -233,7 +209,6 @@ def handle_send_message(data):
             services.save_chat_message(session_id, "bot", answer, user_id)
             return
 
-        # Kiểm tra ngôn ngữ SAU
         if not services.is_vietnamese(message):
             print(f"[Socket.IO] Từ chối - Không phải tiếng Việt: {message}")
             answer = "Xin lỗi, em chỉ hỗ trợ trả lời bằng tiếng Việt ạ. Anh/chị vui lòng nhắn tin bằng tiếng Việt nhé!"
@@ -253,13 +228,11 @@ def handle_send_message(data):
             {"message": "Đang xử lý câu hỏi của bạn...", "session_id": session_id},
         )
 
-        # Dùng SQL Agent cho các câu hỏi thực sự
         if sql_agent:
             print("[Socket.IO] Sử dụng SQL Agent...")
             try:
                 print(f"[DEBUG] Invoking agent with input: {message}")
 
-                # Thời gian bắt đầu gọi agent
                 time_agent_start = time.time()
                 response = sql_agent.invoke({"input": message})
                 time_agent_end = time.time()
@@ -271,15 +244,14 @@ def handle_send_message(data):
                 error_msg = str(e)
                 print(f"[ERROR] Agent invoke failed: {error_msg}")
 
-                # Xử lý lỗi cụ thể
                 if "503" in error_msg or "overloaded" in error_msg.lower():
-                    print(f"[ERROR] ⚠️ Gemini API quá tải (503)")
+                    print(f"[ERROR] Gemini API quá tải (503)")
                     answer = "Dạ, hệ thống AI đang quá tải. Anh/Chị vui lòng thử lại sau ít phút nhé!"
                 elif "timeout" in error_msg.lower():
-                    print(f"[ERROR] ⏱️ Request timeout")
+                    print(f"[ERROR] Request timeout")
                     answer = "Dạ, câu hỏi hơi phức tạp và mất thời gian xử lý. Anh/Chị có thể hỏi đơn giản hơn không ạ?"
                 elif "max iterations" in error_msg.lower():
-                    print(f"[ERROR] 🔄 Agent vượt quá số lần lặp")
+                    print(f"[ERROR] Agent vượt quá số lần lặp")
                     answer = "Dạ, em chưa tìm được câu trả lời phù hợp. Anh/Chị có thể hỏi cụ thể hơn không ạ?"
                 else:
                     answer = "Dạ, em gặp lỗi khi xử lý câu hỏi. Anh/Chị thử hỏi lại được không ạ?"
@@ -295,18 +267,12 @@ def handle_send_message(data):
                 )
                 return
 
-            # Debug: In ra toàn bộ response
             print(f"[DEBUG] Full Agent Response: {response}")
             print(f"[DEBUG] Response type: {type(response)}")
             print(
                 f"[DEBUG] Response keys: {response.keys() if isinstance(response, dict) else 'N/A'}"
             )
 
-            # Phân tích thời gian từng bước
-            time_sql_generation = 0
-            time_sql_execution = 0
-            time_formatting = 0
-            has_steps = False
 
             if (
                 isinstance(response, dict)
@@ -374,7 +340,6 @@ def handle_socket_question(data):
 
         print(f"\n[Socket.IO] Đã nhận câu hỏi: {question}")
 
-        # Kiểm tra ngôn ngữ
         if not services.is_vietnamese(question):
             print(f"[Socket.IO] Từ chối - Không phải tiếng Việt: {question}")
             emit(
@@ -386,7 +351,6 @@ def handle_socket_question(data):
             )
             return
 
-        # Kiểm tra special messages trước
         special_answer = handle_special_messages(question)
         if special_answer:
             emit("answer", {"question": question, "answer": special_answer})
@@ -394,7 +358,6 @@ def handle_socket_question(data):
 
         emit("processing", {"message": "Đang xử lý câu hỏi..."})
 
-        # Dùng SQL Agent mặc định
         if sql_agent:
             print("[Socket.IO] Sử dụng SQL Agent...")
             response_data = sql_agent.invoke({"input": question})
@@ -403,7 +366,6 @@ def handle_socket_question(data):
                 if isinstance(response_data, dict)
                 else str(response_data)
             )
-            # Làm sạch output trước khi trả về
             response = clean_agent_output(raw_response)
         else:
             print("[Socket.IO] SQL Agent không khả dụng, dùng RAG Chain...")

@@ -25,7 +25,7 @@ def handle_special_messages(message):
     greeting_response = handle_greeting(message)
     if greeting_response:
         return greeting_response
-    return None 
+    return None
 
 
 app = Flask(__name__)
@@ -89,7 +89,7 @@ def handle_ask():
             return jsonify({"error": "Không tìm thấy 'question' trong JSON body."}), 400
 
         question = data["question"]
-
+        use_sql_agent = data.get("use_sql_agent", True)
         print(f"\n[API] Đã nhận câu hỏi: {question}")
         print(
             f"[API] Mode: {'SQL Agent (Text-to-SQL)' if use_sql_agent else 'RAG Chain (Regex)'}"
@@ -272,7 +272,6 @@ def handle_send_message(data):
             print(
                 f"[DEBUG] Response keys: {response.keys() if isinstance(response, dict) else 'N/A'}"
             )
-
 
             if (
                 isinstance(response, dict)

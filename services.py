@@ -95,7 +95,7 @@ def filter_sensitive_content(text):
 
         if word_clean in sensitive_words:
             return True, word_clean
-          
+
     for i in range(len(words)):
         if i < len(words) - 1:
             phrase_2 = f"{words[i]} {words[i+1]}"
@@ -158,7 +158,7 @@ def load_llm_pipeline():
         convert_system_message_to_human=True,
         top_p=0.95,
         top_k=40,
-        max_retries=3, 
+        max_retries=3,
         request_timeout=60,
     )
 
